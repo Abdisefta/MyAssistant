@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import * as Notifications from 'expo-notifications';
 import * as Speech from 'expo-speech';
 
 import {
@@ -6,6 +7,8 @@ import {
   generateAssistantReply,
   generateWelcomeMessage,
 } from '@/services/gemini';
+import { getUpcomingMeetingsSummary } from '@/services/meeting-context';
+import { syncMeetingReminders } from '@/services/meeting-reminders';
 import {
   buildSystemPrompt,
   createMessage,
@@ -27,7 +30,7 @@ function historyToTranscript(history: ConversationMessage[]): TranscriptEntry[] 
       {
         id: 'welcome',
         role: 'assistant',
-        text: 'Hej! Skriv eller skicka ett meddelande för att prata med mig.',
+        text: 'Hej! Håll inne mikrofonen eller skriv för att prata med mig.',
       },
     ];
   }
@@ -53,7 +56,10 @@ function mergeUnique(existing: string[], additions: string[]): string[] {
   return merged;
 }
 
-export function useAssistant() {
+export function useAssistant(userId?: string) {
+  const userIdRef = useRef(userId);
+  userIdRef.current = userId;
+
   const [memory, setMemory] = useState<UserMemory | null>(null);
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -65,20 +71,48 @@ export function useAssistant() {
     Speech.speak(text, { language: 'sv-SE', rate: 0.95 });
   }, []);
 
+  const refreshReminders = useCallback(async (mem: UserMemory) => {
+    try {
+      await syncMeetingReminders(mem);
+    } catch (error) {
+      console.warn('Meeting reminders sync failed:', error);
+    }
+  }, []);
+
   useEffect(() => {
+    let active = true;
+
     (async () => {
-      const stored = await loadMemory();
+      setIsLoading(true);
+      const stored = await loadMemory(userId);
+      if (!active) return;
       setMemory(stored);
       setTranscript(historyToTranscript(stored.conversationHistory));
       setShowOnboarding(!stored.onboardingComplete);
       setIsLoading(false);
+      await refreshReminders(stored);
     })();
-  }, []);
+
+    return () => {
+      active = false;
+    };
+  }, [userId, refreshReminders]);
+
+  useEffect(() => {
+    const sub = Notifications.addNotificationReceivedListener((notification) => {
+      const data = notification.request.content.data;
+      if (data?.type === 'meeting' && notification.request.content.body) {
+        speak(notification.request.content.body as string);
+      }
+    });
+    return () => sub.remove();
+  }, [speak]);
 
   const completeOnboarding = useCallback(
     async (name: string, job: string) => {
       const trimmedName = name.trim();
       const trimmedJob = job.trim();
+      const uid = userIdRef.current;
 
       const baseMemory: UserMemory = {
         name: trimmedName,
@@ -87,12 +121,15 @@ export function useAssistant() {
         personalNotes: [],
         onboardingComplete: true,
         conversationHistory: [],
+        meetingRemindersEnabled: true,
+        reminderMinutesBefore: 15,
       };
 
       setIsThinking(true);
 
       try {
-        const systemPrompt = buildSystemPrompt(baseMemory);
+        const meetingContext = await getUpcomingMeetingsSummary();
+        const systemPrompt = buildSystemPrompt(baseMemory, meetingContext);
         const welcome = await generateWelcomeMessage(systemPrompt, trimmedName);
         const welcomeMessage = createMessage('assistant', welcome);
         const updatedMemory: UserMemory = {
@@ -100,21 +137,21 @@ export function useAssistant() {
           conversationHistory: [welcomeMessage],
         };
 
-        await saveMemory(updatedMemory);
+        await saveMemory(updatedMemory, uid);
         setMemory(updatedMemory);
         setTranscript(historyToTranscript(updatedMemory.conversationHistory));
         setShowOnboarding(false);
         speak(welcome);
+        await refreshReminders(updatedMemory);
       } catch (error) {
-        const fallback =
-          `Hej ${trimmedName}! Jag är din assistent. Hur kan jag hjälpa dig idag?`;
+        const fallback = `Hej ${trimmedName}! Jag är din personliga assistent. Hur kan jag hjälpa dig idag?`;
         const welcomeMessage = createMessage('assistant', fallback);
         const updatedMemory: UserMemory = {
           ...baseMemory,
           conversationHistory: [welcomeMessage],
         };
 
-        await saveMemory(updatedMemory);
+        await saveMemory(updatedMemory, uid);
         setMemory(updatedMemory);
         setTranscript(historyToTranscript(updatedMemory.conversationHistory));
         setShowOnboarding(false);
@@ -124,7 +161,7 @@ export function useAssistant() {
         setIsThinking(false);
       }
     },
-    [speak],
+    [speak, refreshReminders],
   );
 
   const sendMessage = useCallback(
@@ -132,18 +169,20 @@ export function useAssistant() {
       const trimmed = text.trim();
       if (!trimmed || !memory || isThinking) return;
 
+      const uid = userIdRef.current;
       const userMessage = createMessage('user', trimmed);
       const historyWithUser = [...memory.conversationHistory, userMessage];
 
       setTranscript((prev) => [
-        ...prev.filter((e) => e.text !== 'Lyssnar...'),
+        ...prev.filter((e) => e.text !== 'Lyssnar...' && e.id !== 'partial'),
         { id: userMessage.id, role: 'user', text: trimmed },
         { id: 'thinking', role: 'system', text: 'Tänker...' },
       ]);
       setIsThinking(true);
 
       try {
-        const systemPrompt = buildSystemPrompt(memory);
+        const meetingContext = await getUpcomingMeetingsSummary();
+        const systemPrompt = buildSystemPrompt(memory, meetingContext);
         const reply = await generateAssistantReply(
           systemPrompt,
           memory.conversationHistory,
@@ -167,15 +206,13 @@ export function useAssistant() {
           preferences: mergeUnique(memory.preferences, learnings.preferences),
         };
 
-        await saveMemory(updatedMemory);
+        await saveMemory(updatedMemory, uid);
         setMemory(updatedMemory);
         setTranscript(historyToTranscript(updatedHistory));
         speak(reply);
       } catch (error) {
         const errorText =
-          error instanceof Error
-            ? error.message
-            : 'Något gick fel. Försök igen.';
+          error instanceof Error ? error.message : 'Något gick fel. Försök igen.';
 
         setTranscript((prev) => [
           ...prev.filter((e) => e.text !== 'Tänker...'),
@@ -189,21 +226,50 @@ export function useAssistant() {
   );
 
   const clearHistory = useCallback(async () => {
-    const updated = await clearConversationHistory();
+    const updated = await clearConversationHistory(userIdRef.current);
     setMemory(updated);
     setTranscript(historyToTranscript([]));
   }, []);
 
-  const setListeningState = useCallback((listening: boolean) => {
+  const setListeningState = useCallback((listening: boolean, partial?: string) => {
     if (listening) {
       setTranscript((prev) => {
-        if (prev.some((e) => e.text === 'Lyssnar...')) return prev;
-        return [...prev, { id: 'listening', role: 'system', text: 'Lyssnar...' }];
+        const filtered = prev.filter(
+          (e) => e.id !== 'listening' && e.id !== 'partial' && e.text !== 'Lyssnar...',
+        );
+        if (partial?.trim()) {
+          return [
+            ...filtered,
+            { id: 'partial', role: 'user', text: partial.trim() },
+          ];
+        }
+        return [...filtered, { id: 'listening', role: 'system', text: 'Lyssnar...' }];
       });
     } else {
-      setTranscript((prev) => prev.filter((e) => e.text !== 'Lyssnar...'));
+      setTranscript((prev) =>
+        prev.filter(
+          (e) => e.id !== 'listening' && e.id !== 'partial' && e.text !== 'Lyssnar...',
+        ),
+      );
     }
   }, []);
+
+  const syncReminders = useCallback(async () => {
+    if (!memory) return;
+    await refreshReminders(memory);
+  }, [memory, refreshReminders]);
+
+  const updateMeetingReminders = useCallback(
+    async (enabled: boolean) => {
+      if (!memory) return;
+      const uid = userIdRef.current;
+      const updated: UserMemory = { ...memory, meetingRemindersEnabled: enabled };
+      await saveMemory(updated, uid);
+      setMemory(updated);
+      await refreshReminders(updated);
+    },
+    [memory, refreshReminders],
+  );
 
   return {
     memory,
@@ -216,5 +282,7 @@ export function useAssistant() {
     clearHistory,
     setListeningState,
     speak,
+    syncReminders,
+    updateMeetingReminders,
   };
 }

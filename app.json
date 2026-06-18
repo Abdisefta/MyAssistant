@@ -1,24 +1,27 @@
 {
   "expo": {
-    "name": "MyAssistantFinal",
+    "name": "My Assistant",
     "slug": "MyAssistantFinal",
-    "version": "1.0.0",
+    "version": "1.0.2",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "myassistantfinal",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.abdisefta.myassistantfinal"
     },
     "android": {
+      "package": "com.abdisefta.myassistantfinal",
+      "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "edgeToEdgeEnabled": true,
+      "edgeToEdgeEnabled": false,
       "predictiveBackGestureEnabled": false
     },
     "web": {
@@ -38,11 +41,42 @@
             "backgroundColor": "#000000"
           }
         }
-      ]
+      ],
+      "expo-web-browser",
+      [
+        "expo-calendar",
+        {
+          "calendarPermission": "My Assistant behöver läsa din kalender för att visa möten från Google, Apple och andra kalendrar."
+        }
+      ],
+      [
+        "expo-apple-authentication"
+      ],
+      [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.374079725397-dms02mgthkod66afkr41bd41ok1q4chs"
+        }
+      ],
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "My Assistant behöver mikrofonen för att lyssna på dina frågor.",
+          "speechRecognitionPermission": "My Assistant behöver röstigenkänning för att förstå vad du säger.",
+          "androidSpeechServicePackages": ["com.google.android.googlequicksearchbox"]
+        }
+      ],
+      "expo-notifications"
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "22e289d9-e041-4b20-a6c8-ec007b28d559"
+      }
     }
   }
 }

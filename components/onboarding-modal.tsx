@@ -11,6 +11,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const COLORS = {
   background: '#0D0D0D',
@@ -35,12 +36,12 @@ export function OnboardingModal({ visible, isSubmitting, onComplete }: Onboardin
   const canSubmit = name.trim().length > 0 && job.trim().length > 0 && !isSubmitting;
 
   return (
-    <Modal visible={visible} animationType="fade" transparent>
-      <View style={styles.overlay}>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.cardWrap}
-        >
+    <Modal visible={visible} animationType="fade" transparent statusBarTranslucent>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
+        style={styles.overlay}
+      >
+        <SafeAreaView edges={['top', 'bottom']} style={styles.safe}>
           <View style={styles.card}>
             <View style={styles.iconWrap}>
               <Ionicons name="sparkles" size={28} color={COLORS.purple} />
@@ -59,6 +60,9 @@ export function OnboardingModal({ visible, isSubmitting, onComplete }: Onboardin
               onChangeText={setName}
               autoCapitalize="words"
               editable={!isSubmitting}
+              cursorColor={COLORS.purple}
+              selectionColor="rgba(139, 124, 247, 0.3)"
+              keyboardAppearance="dark"
             />
 
             <Text style={styles.label}>Vad jobbar du med?</Text>
@@ -69,6 +73,9 @@ export function OnboardingModal({ visible, isSubmitting, onComplete }: Onboardin
               value={job}
               onChangeText={setJob}
               editable={!isSubmitting}
+              cursorColor={COLORS.purple}
+              selectionColor="rgba(139, 124, 247, 0.3)"
+              keyboardAppearance="dark"
             />
 
             <Pressable
@@ -83,8 +90,8 @@ export function OnboardingModal({ visible, isSubmitting, onComplete }: Onboardin
               )}
             </Pressable>
           </View>
-        </KeyboardAvoidingView>
-      </View>
+        </SafeAreaView>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -94,10 +101,11 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.85)',
     justifyContent: 'center',
-    padding: 24,
   },
-  cardWrap: {
-    width: '100%',
+  safe: {
+    flex: 1,
+    justifyContent: 'center',
+    padding: 24,
   },
   card: {
     backgroundColor: COLORS.surface,
@@ -141,8 +149,8 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    color: COLORS.text,
-    fontSize: 15,
+    color: '#FFFFFF',
+    fontSize: 16,
     marginBottom: 8,
   },
   button: {
