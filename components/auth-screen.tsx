@@ -89,7 +89,7 @@ export function AuthScreen({ isConfigured }: { isConfigured: boolean }) {
           </View>
           <Text style={styles.title}>My Assistant</Text>
           <Text style={styles.subtitle}>
-            Logga in med Google eller Apple — eller skapa konto med e-post.
+            Logga in med Google{isAppleSignInAvailable() ? ', Apple' : ''} eller skapa konto med e-post.
           </Text>
 
           <Pressable

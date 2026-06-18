@@ -1,11 +1,13 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { initializeApp, getApps, type FirebaseApp } from 'firebase/app';
 import {
   createUserWithEmailAndPassword,
-  FacebookAuthProvider,
   getAuth,
   GoogleAuthProvider,
+  initializeAuth,
+  getReactNativePersistence,
   OAuthProvider,
   onAuthStateChanged,
   signInWithCredential,
@@ -18,12 +20,16 @@ import {
 import { Platform } from 'react-native';
 
 import { FIREBASE_CONFIG, isFirebaseConfigured } from '@/constants/firebase';
+import {
+  configureGoogleSignIn,
+  isGoogleSignInConfigured,
+} from '@/services/google-signin-config';
 
 export type AppUser = {
   uid: string;
   email: string | null;
   displayName: string | null;
-  provider: 'google' | 'apple' | 'email' | 'facebook' | 'microsoft' | 'unknown';
+  provider: 'google' | 'apple' | 'email' | 'unknown';
 };
 
 let firebaseApp: FirebaseApp | null = null;
@@ -33,8 +39,6 @@ function getProviderId(user: User): AppUser['provider'] {
   const providerId = user.providerData[0]?.providerId;
   if (providerId === 'google.com') return 'google';
   if (providerId === 'apple.com') return 'apple';
-  if (providerId === 'facebook.com') return 'facebook';
-  if (providerId === 'microsoft.com') return 'microsoft';
   if (providerId === 'password') return 'email';
   return 'unknown';
 }
@@ -58,7 +62,13 @@ export function getFirebaseAuth(): Auth | null {
   }
 
   if (!auth) {
-    auth = getAuth(firebaseApp);
+    try {
+      auth = initializeAuth(firebaseApp, {
+        persistence: getReactNativePersistence(AsyncStorage),
+      });
+    } catch {
+      auth = getAuth(firebaseApp);
+    }
   }
 
   return auth;
@@ -128,7 +138,15 @@ export async function loginWithGoogle(): Promise<{ user: AppUser | null; error: 
     return { user: null, error: 'Inloggning är inte konfigurerad ännu.' };
   }
 
+  if (!isGoogleSignInConfigured()) {
+    return {
+      user: null,
+      error: 'Google-inloggning är inte konfigurerad. Sätt EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID.',
+    };
+  }
+
   try {
+    configureGoogleSignIn();
     await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
     const response = await GoogleSignin.signIn();
     if (response.type !== 'success') {
@@ -198,45 +216,6 @@ export async function loginWithApple(): Promise<{ user: AppUser | null; error: s
   }
 }
 
-export async function loginWithFacebookAccessToken(
-  accessToken: string,
-): Promise<{ user: AppUser | null; error: string | null }> {
-  const firebaseAuth = getFirebaseAuth();
-  if (!firebaseAuth) {
-    return { user: null, error: 'Inloggning är inte konfigurerad ännu.' };
-  }
-
-  try {
-    const credential = FacebookAuthProvider.credential(accessToken);
-    const result = await signInWithCredential(firebaseAuth, credential);
-    return { user: mapFirebaseUser(result.user), error: null };
-  } catch (err: unknown) {
-    return { user: null, error: mapAuthError(err) };
-  }
-}
-
-export async function loginWithMicrosoftTokens(
-  idToken: string,
-  accessToken?: string,
-): Promise<{ user: AppUser | null; error: string | null }> {
-  const firebaseAuth = getFirebaseAuth();
-  if (!firebaseAuth) {
-    return { user: null, error: 'Inloggning är inte konfigurerad ännu.' };
-  }
-
-  try {
-    const provider = new OAuthProvider('microsoft.com');
-    const credential = provider.credential({
-      idToken,
-      accessToken,
-    });
-    const result = await signInWithCredential(firebaseAuth, credential);
-    return { user: mapFirebaseUser(result.user), error: null };
-  } catch (err: unknown) {
-    return { user: null, error: mapAuthError(err) };
-  }
-}
-
 export async function signOutApp(): Promise<void> {
   const firebaseAuth = getFirebaseAuth();
   if (firebaseAuth) {
@@ -269,7 +248,7 @@ function mapAuthError(err: unknown): string {
       return 'Nätverksfel. Kolla internet.';
     default:
       if (message.includes('DEVELOPER_ERROR')) {
-        return 'Google-inloggning fel. Kontrollera app-inställningar.';
+        return 'Google-inloggning fel. Kontrollera SHA-1 och Web client ID i Google Cloud.';
       }
       return 'Inloggning misslyckades. Försök igen.';
   }

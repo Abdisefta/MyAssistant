@@ -1,0 +1,22 @@
+My Assistant — din personliga assistent i fickan
+
+My Assistant hjälper dig att hålla koll på vardagen med AI, röst, e-post, kalender och uppgifter — på svenska.
+
+🎙️ Röstassistent
+Prata eller skriv med assistenten. Den minns dina preferenser och konversationer lokalt på enheten och svarar med hjälp av Google Gemini.
+
+📧 E-post (Google Mail)
+Koppla ditt Google-konto för att läsa och skicka mail direkt i appen. Sammanfattningar och svar när du behöver dem.
+
+📅 Kalender
+Se kommande möten från kalendrar på enheten. Få påminnelser innan möten och låt assistenten ge dig kontext inför dagen.
+
+✅ Uppgifter
+Hantera dina uppgifter och få stöd från assistenten att prioritera det viktigaste.
+
+🔐 Säker inloggning
+Logga in med Google, Apple (iPhone) eller e-post och lösenord via Firebase. Ditt minne och din historik kopplas till ditt konto på enheten.
+
+My Assistant är utvecklad av Abdi / Abdisefta för dig som vill ha en enkel, mörk och modern assistent — utan onödig krångel.
+
+Krav: internet för AI och e-post. Vissa funktioner kräver att du kopplar Google Mail och ger kalenderbehörighet.

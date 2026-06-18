@@ -3,18 +3,20 @@ import {
   statusCodes,
 } from '@react-native-google-signin/google-signin';
 
-export const WEB_CLIENT_ID =
-  '374079725397-jkr64l8u91blmbdeib0r2vnq6hc9s8hq.apps.googleusercontent.com';
+import {
+  configureGoogleSignIn,
+  GOOGLE_WEB_CLIENT_ID,
+  isGoogleSignInConfigured,
+} from '@/services/google-signin-config';
+
+export { GOOGLE_WEB_CLIENT_ID };
 
 export const GMAIL_SCOPES = [
   'https://www.googleapis.com/auth/gmail.readonly',
   'https://www.googleapis.com/auth/gmail.send',
 ];
 
-GoogleSignin.configure({
-  webClientId: WEB_CLIENT_ID,
-  offlineAccess: true,
-});
+configureGoogleSignIn();
 
 export type GoogleUserSession = {
   accessToken: string;
@@ -54,7 +56,15 @@ export async function signInWithGoogle(): Promise<{
   session: GoogleUserSession | null;
   error: string | null;
 }> {
+  if (!isGoogleSignInConfigured()) {
+    return {
+      session: null,
+      error: 'Google-inloggning är inte konfigurerad. Sätt EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID.',
+    };
+  }
+
   try {
+    configureGoogleSignIn();
     await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
 
     const response = await GoogleSignin.signIn();

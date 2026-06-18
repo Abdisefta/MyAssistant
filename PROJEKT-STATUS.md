@@ -1,4 +1,4 @@
-# My Assistant — projektstatus (uppdaterad 2025-06-18)
+# My Assistant — projektstatus (uppdaterad 2025-06-19)
 
 Sammanfattning av vad som gjorts och vad som återstår. Läs denna fil när du fortsätter.
 
@@ -7,69 +7,83 @@ Sammanfattning av vad som gjorts och vad som återstår. Läs denna fil när du 
 - **Sökväg:** `C:\Users\user\My-assistent\MyAssistant\MyAssistantFinal`
 - **Paket:** `com.abdisefta.myassistantfinal`
 - **Expo/EAS:** inloggad som `abdisefta`, projectId `22e289d9-e041-4b20-a6c8-ec007b28d559`
-- **Version på telefon (senaste lyckade bygge):** 1.0.2 — build `5bafa766-2309-4eef-9696-d3fa0c099ac2`
+- **GitHub:** https://github.com/Abdisefta/MyAssistant
 
 ## Vad fungerar ✅
 - Mörk UI, lila orb, 5 flikar (Email, Kalender, Assistent, Uppgifter, Inställningar)
-- **Kalender** — läser möten från telefonen (fix: `device-calendar.ts`, inte `NativeModules`)
-- **Email** — Gmail (logga in med Google i Email-fliken; 14495 olästa syns)
-- **EAS build** — `npx eas-cli build --platform android --profile preview`
-- **Personligt minne** — sparas per Firebase `uid` (namn, jobb, preferenser)
-- **Röst in (kod)** — `expo-speech-recognition`, håll inne mikrofon
-- **Röst ut (kod)** — `expo-speech` när Gemini svarar
-- **Mötesnotiser (kod)** — 15 min innan möte, Inställningar → på/av
-- Microsoft-inloggning borttagen från UI (inte behövs nu)
+- **Kalender** — läser möten från telefonen
+- **Email** — Gmail läsa + skicka (Email-fliken; `gmail.send` finns)
+- **EAS build** — preview APK
+- **Personligt minne** — per Firebase `uid`
+- **Röst in/ut + mötesnotiser** — kod finns (kräver APK med Gemini-nyckel)
 
-## Vad INTE fungerar än ❌
-- **Assistenten svarar/pratar inte** — fel: "Gemini API-nyckel saknas"
-  - `.env` på datorn har nyckel, men **EAS molnet bygger utan den**
-  - Användaren råkade sätta `DIN_NYCKEL_HÄR` som env i Expo — måste fixas med **riktig** nyckel
-- **Firebase inloggning** — `.env` saknar Firebase-nycklar (bara Gemini finns lokalt)
-- **Play Store / App Store** — inte publicerat än (production build + privacy policy)
+## Gemini (pågående)
+- Nyckelformat: `AQ....` (inte `AIzaSy`) — från Google AI Studio
+- Modell i app: `gemini-flash-latest`, header `X-goog-api-key`
+- EAS: `EXPO_PUBLIC_GEMINI_API_KEY` i `preview` environment (overwrite med rätt nyckel)
+- Efter build: testa "Vet du vad jag heter?" + mikrofon
 
-## Imorgon — fixa assistenten (3 steg)
-PowerShell, först `cd` till projektet:
-```powershell
-cd C:\Users\user\My-assistent\MyAssistant\MyAssistantFinal
-```
+## NÄSTA FEATURE — sparad av användaren (bygg exakt så)
 
-1. Kopiera nyckel från `.env` (rad `EXPO_PUBLIC_GEMINI_API_KEY=...`)
-   - Om ogiltig: skapa ny på https://aistudio.google.com/apikey
+**Kommando:** *"bygg skicka mail via röst"* eller *"läs PROJEKT-STATUS.md och bygg mail via assistenten"*
 
-2. Lägg nyckel i Expo (byt ut med riktig nyckel):
-```powershell
-npx eas-cli env:delete --name EXPO_PUBLIC_GEMINI_API_KEY --environment preview
-npx eas-cli env:create --name EXPO_PUBLIC_GEMINI_API_KEY --value "RIKTIG_NYCKEL_HÄR" --environment preview --visibility plaintext
-```
+**Exempel:** Användaren säger: *"Skicka ett mail till Magnus att vi ska träffas och ha möte på onsdag."*
 
-3. Bygg och installera:
-```powershell
-npx eas-cli build --platform android --profile preview
-```
-→ Build finished → QR/länk → installera APK på telefon → testa "Vet du vad jag heter?"
+**Flöde (obligatoriskt — alltid bekräftelse innan skick):**
+1. Assistenten **förstår** person (Magnus), innehåll (möte), tid (onsdag)
+2. **Hittar e-post** för personen (från tidigare Gmail / kontakter)
+3. **Gemini skriver** professionellt mail på svenska
+4. **Visar förhandsgranskning** + frågar: *"Ska jag skicka till magnus@...?"*
+5. Användaren säger **ja** (röst eller knapp) → **skicka via Gmail API**
+6. Assistenten bekräftar: *"Mailet är skickat."*
 
-## Viktiga kommandon
-| Vad | Kommando |
-|-----|----------|
-| Bygga APK | `npx eas-cli build --platform android --profile preview` |
-| Emulator-fråga | Skriv `n` |
-| EAS inloggning | `npx eas-cli login` (redan abdisefta) |
+**Tekniskt (redan delvis i appen):**
+- `sendGmailMessage` i `email-tab.tsx` — flytta till `services/gmail-send.ts`
+- `gmail.send` scope finns i `google-auth.ts`
+- Koppla `useAssistant` + Google `accessToken` från `index.tsx`
+- **ALDRIG** skicka utan bekräftelse (användaren valde detta)
 
-## Nycklar & config
-- **Gemini:** `EXPO_PUBLIC_GEMINI_API_KEY` i `.env` + måste finnas i EAS `preview` environment
-- **Firebase (saknas i .env):** `EXPO_PUBLIC_FIREBASE_API_KEY`, `AUTH_DOMAIN`, `PROJECT_ID`, `APP_ID`
-- **Google (Gmail):** Web Client ID i projektet, SHA-1: `7A:02:F4:E4:7D:E3:16:99:C6:AD:53:A6:2F:6A:8E:3D:0F:C6:39:C5`
+**Bonus senare:** skapa kalenderhändelse samma dag (onsdag) när mailet skickas.
+
+## PLAN — Egen admin-dashboard (bygg sen)
+
+**Kommando:** *"bygg admin-dashboard"* eller *"läs PROJEKT-STATUS.md och bygg dashboard"*
+
+**Mål:** En **snygg, smidig och enkel** webbsida på datorn — **allt viktigt på ett ställe** (inte hoppa mellan Firebase, Play, Expo, AI Studio).
+
+**Design:** Samma mörk + lila stil som appen. Stor överblick, få klick, svenska.
+
+**Vad dashboarden ska visa (endast du som ägare):**
+| Ruta | Innehåll |
+|------|----------|
+| **Användare** | Hur många registrerade, nya idag/veckan (Firebase Auth) |
+| **Appen** | Aktiva användare, kraschar (Firebase Analytics + Play) |
+| **Intäkter** | Prenumerationer, månadens summa (Play / RevenueCat) |
+| **AI** | Gemini-anrop / ungefärlig kostnad (AI Studio eller egen logg) |
+| **Byggen** | Senaste APK, status (Expo EAS) |
+| **Snabbstatus** | Grön/gul/röd: API, Firebase, app live |
+
+**Vad den INTE ska visa (integritet):**
+- Användares mail, chattar, kalenderinnehåll
+- Bara **statistik och affär** — inte privata data
+
+**Teknik (förslag när vi bygger):**
+- Webb: Next.js eller enkel React-sida (mörkt tema)
+- Data: Firebase Admin + Play API + Expo API (read-only)
+- Inloggning: bara **din** Google-konto / lösenord
+- Hosting: Firebase Hosting eller Vercel
+
+**Bygg efter:** Firebase inloggning + Play Store publicerad (så data finns att visa).
 
 ## Kvar efter assistenten funkar
-1. Firebase Web-app + Android-app i Console → fyll `.env` → ny build → testa inloggning (e-post, Google, Apple)
-2. `eas build --profile production` → Play Store
-3. Privacy policy (krävs för butiker)
-4. iOS / App Store + Apple-inloggning i Firebase
-5. Förbättringar: uppgifter sparas per användare, riktig körtid i briefing, Outlook-mail
+1. **Röst → skicka mail** (se NÄSTA FEATURE ovan)
+2. Firebase inloggning → `.env` + ny build
+3. Production build → Play Store + privacy policy
+4. App Store + Apple
+5. **Egen admin-dashboard** (ovan)
+6. Uppgifter per användare, riktig körtid i briefing, Outlook
 
-## Cursor / tema
-- Mörkt tema: `Default High Contrast` i settings.json
-- Breadcrumbs avstängda
-
-## Säg till Cursor imorgon
-> "Läs PROJEKT-STATUS.md och hjälp mig fixa Gemini-nyckeln"
+## Säg till Cursor
+- Gemini: *"Läs PROJEKT-STATUS.md och hjälp mig med Gemini"*
+- Mail via röst: *"bygg skicka mail via röst"*
+- Dashboard: *"bygg admin-dashboard"*

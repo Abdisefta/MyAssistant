@@ -89,13 +89,9 @@ function SettingsTab({
       ? 'Google'
       : appUser?.provider === 'apple'
         ? 'Apple'
-        : appUser?.provider === 'facebook'
-          ? 'Facebook'
-          : appUser?.provider === 'microsoft'
-            ? 'Microsoft'
-            : appUser?.provider === 'email'
-              ? 'E-post'
-              : '—';
+        : appUser?.provider === 'email'
+          ? 'E-post'
+          : '—';
 
   return (
     <ScrollView style={styles.settingsScroll} contentContainerStyle={styles.settingsContent}>
@@ -362,7 +358,7 @@ export default function HomeScreen() {
     }
   };
 
-  if (authConfigured && authLoading) {
+  if (authLoading) {
     return (
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <View style={styles.loadingWrap}>
@@ -373,8 +369,8 @@ export default function HomeScreen() {
     );
   }
 
-  if (authConfigured && !appUser) {
-    return <AuthScreen isConfigured={true} />;
+  if (!appUser) {
+    return <AuthScreen isConfigured={authConfigured} />;
   }
 
   return (

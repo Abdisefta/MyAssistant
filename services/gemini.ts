@@ -1,4 +1,9 @@
-import { GEMINI_API_KEY, GEMINI_API_URL } from '@/constants/gemini';
+import {
+  GEMINI_API_KEY,
+  GEMINI_MODELS,
+  geminiApiUrl,
+  validateGeminiApiKey,
+} from '@/constants/gemini';
 import type { ConversationMessage } from '@/types/memory';
 
 type GeminiRole = 'user' | 'model';
@@ -14,38 +19,92 @@ type GeminiResponse = {
       parts?: Array<{ text?: string }>;
     };
   }>;
-  error?: { message?: string };
+  error?: { message?: string; status?: string };
 };
 
-async function callGemini(
+const REQUEST_TIMEOUT_MS = 12000;
+
+const keyCheck = validateGeminiApiKey();
+if (!keyCheck.valid) {
+  console.warn('[Gemini]', keyCheck.error);
+}
+
+function isTimeoutError(err: Error): boolean {
+  return err.message.includes('tog för lång tid');
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`${label} tog för lång tid. Kontrollera internet och försök igen.`));
+    }, ms);
+
+    promise
+      .then((value) => {
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+  });
+}
+
+function parseGeminiError(data: GeminiResponse, status: number): string {
+  if (status === 401 || status === 403) {
+    return 'Ogiltig Gemini API-nyckel. Kontrollera EXPO_PUBLIC_GEMINI_API_KEY i EAS och bygg om appen.';
+  }
+
+  const message = data.error?.message ?? '';
+  const lower = message.toLowerCase();
+
+  if (
+    lower.includes('api key') ||
+    lower.includes('api_key') ||
+    lower.includes('invalid key') ||
+    lower.includes('permission denied')
+  ) {
+    return 'Ogiltig Gemini API-nyckel. Kontrollera att hela nyckeln är korrekt i EAS och bygg om appen.';
+  }
+
+  if (message) return message;
+  return `Gemini API-fel (${status})`;
+}
+
+async function callGeminiOnce(
+  model: string,
   systemInstruction: string,
   contents: GeminiContent[],
 ): Promise<string> {
-  if (!GEMINI_API_KEY) {
-    throw new Error(
-      'Gemini API-nyckel saknas. Lägg till EXPO_PUBLIC_GEMINI_API_KEY i .env',
-    );
-  }
+  const url = geminiApiUrl(model);
 
-  const response = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      systemInstruction: {
-        parts: [{ text: systemInstruction }],
+  const response = await withTimeout(
+    fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-goog-api-key': GEMINI_API_KEY,
       },
-      contents,
-      generationConfig: {
-        temperature: 0.85,
-        maxOutputTokens: 512,
-      },
+      body: JSON.stringify({
+        systemInstruction: {
+          parts: [{ text: systemInstruction }],
+        },
+        contents,
+        generationConfig: {
+          temperature: 0.85,
+          maxOutputTokens: 512,
+        },
+      }),
     }),
-  });
+    REQUEST_TIMEOUT_MS,
+    'Gemini',
+  );
 
   const data = (await response.json()) as GeminiResponse;
 
   if (!response.ok) {
-    throw new Error(data.error?.message ?? `Gemini API-fel (${response.status})`);
+    throw new Error(parseGeminiError(data, response.status));
   }
 
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
@@ -54,6 +113,33 @@ async function callGemini(
   }
 
   return text;
+}
+
+async function callGemini(
+  systemInstruction: string,
+  contents: GeminiContent[],
+): Promise<string> {
+  const validation = validateGeminiApiKey();
+  if (!validation.valid) {
+    throw new Error(validation.error);
+  }
+
+  let lastError: Error | null = null;
+
+  for (const model of GEMINI_MODELS) {
+    try {
+      return await callGeminiOnce(model, systemInstruction, contents);
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      console.warn(`Gemini model ${model} failed:`, lastError.message);
+
+      if (isTimeoutError(lastError)) {
+        throw lastError;
+      }
+    }
+  }
+
+  throw lastError ?? new Error('Kunde inte nå Gemini. Försök igen.');
 }
 
 export function toGeminiHistory(history: ConversationMessage[]): GeminiContent[] {

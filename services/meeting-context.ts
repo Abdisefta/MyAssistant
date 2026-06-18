@@ -12,18 +12,19 @@ function addDays(date: Date, days: number): Date {
 }
 
 export async function getUpcomingMeetingsSummary(daysAhead = 2): Promise<string> {
-  const access = await getCalendarAccessState();
-  if (access !== 'granted') {
-    return 'Kalenderbehörighet saknas — kan inte läsa möten.';
-  }
+  try {
+    const access = await getCalendarAccessState();
+    if (access !== 'granted') {
+      return 'Kalenderbehörighet saknas — kan inte läsa möten.';
+    }
 
-  const today = new Date();
-  const allEvents: CalendarEventItem[] = [];
+    const today = new Date();
+    const allEvents: CalendarEventItem[] = [];
 
-  for (let i = 0; i <= daysAhead; i++) {
-    const dayEvents = await fetchEventsForDay(addDays(today, i));
-    allEvents.push(...dayEvents);
-  }
+    for (let i = 0; i <= daysAhead; i++) {
+      const dayEvents = await fetchEventsForDay(addDays(today, i));
+      allEvents.push(...dayEvents);
+    }
 
   if (!allEvents.length) {
     return 'Inga möten de närmaste dagarna.';
@@ -51,4 +52,7 @@ export async function getUpcomingMeetingsSummary(daysAhead = 2): Promise<string>
       return `${dayLabel} ${time}: ${e.title}${loc}`;
     })
     .join('\n- ');
+  } catch {
+    return 'Kunde inte läsa kalender just nu.';
+  }
 }

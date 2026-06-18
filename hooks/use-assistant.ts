@@ -42,6 +42,21 @@ function historyToTranscript(history: ConversationMessage[]): TranscriptEntry[] 
   }));
 }
 
+function promiseWithTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(fallback), ms);
+    promise
+      .then((value) => {
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch(() => {
+        clearTimeout(timer);
+        resolve(fallback);
+      });
+  });
+}
+
 function mergeUnique(existing: string[], additions: string[]): string[] {
   const set = new Set(existing.map((s) => s.toLowerCase()));
   const merged = [...existing];
@@ -181,7 +196,11 @@ export function useAssistant(userId?: string) {
       setIsThinking(true);
 
       try {
-        const meetingContext = await getUpcomingMeetingsSummary();
+        const meetingContext = await promiseWithTimeout(
+          getUpcomingMeetingsSummary(),
+          3000,
+          '',
+        );
         const systemPrompt = buildSystemPrompt(memory, meetingContext);
         const reply = await generateAssistantReply(
           systemPrompt,
@@ -192,24 +211,45 @@ export function useAssistant(userId?: string) {
         const assistantMessage = createMessage('assistant', reply);
         const updatedHistory = [...historyWithUser, assistantMessage];
 
-        const learnings = await extractLearnings(
-          trimmed,
-          reply,
-          memory.personalNotes,
-          memory.preferences,
+        setMemory((prev) =>
+          prev ? { ...prev, conversationHistory: updatedHistory } : prev,
         );
-
-        const updatedMemory: UserMemory = {
-          ...memory,
-          conversationHistory: updatedHistory,
-          personalNotes: mergeUnique(memory.personalNotes, learnings.notes),
-          preferences: mergeUnique(memory.preferences, learnings.preferences),
-        };
-
-        await saveMemory(updatedMemory, uid);
-        setMemory(updatedMemory);
         setTranscript(historyToTranscript(updatedHistory));
         speak(reply);
+        setIsThinking(false);
+
+        void (async () => {
+          try {
+            const learnings = await extractLearnings(
+              trimmed,
+              reply,
+              memory.personalNotes,
+              memory.preferences,
+            );
+
+            const updatedMemory: UserMemory = {
+              ...memory,
+              conversationHistory: updatedHistory,
+              personalNotes: mergeUnique(memory.personalNotes, learnings.notes),
+              preferences: mergeUnique(memory.preferences, learnings.preferences),
+            };
+
+            await saveMemory(updatedMemory, uid);
+            setMemory(updatedMemory);
+          } catch (bgError) {
+            console.warn('Background learning save failed:', bgError);
+            try {
+              const fallbackMemory: UserMemory = {
+                ...memory,
+                conversationHistory: updatedHistory,
+              };
+              await saveMemory(fallbackMemory, uid);
+              setMemory(fallbackMemory);
+            } catch (saveError) {
+              console.warn('Background conversation save failed:', saveError);
+            }
+          }
+        })();
       } catch (error) {
         const errorText =
           error instanceof Error ? error.message : 'Något gick fel. Försök igen.';
@@ -218,7 +258,6 @@ export function useAssistant(userId?: string) {
           ...prev.filter((e) => e.text !== 'Tänker...'),
           { id: `error-${Date.now()}`, role: 'system', text: errorText },
         ]);
-      } finally {
         setIsThinking(false);
       }
     },
