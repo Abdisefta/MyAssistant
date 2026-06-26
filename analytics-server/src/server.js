@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import cors from 'cors';
 import express from 'express';
 
-import { addExpense, deleteExpense, getOverview, listExpenses, recordEvent } from './db.js';
+import { addExpense, deleteExpense, getOverview, listExpenses, recordEvent, checkUsageLimit, getUsageLimits, setUsageLimits } from './db.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT ?? 3002);
@@ -79,9 +79,45 @@ app.post('/api/events', requireApiKey, (req, res) => {
     const result = recordEvent({ type, deviceId, appVersion, platform, meta: meta ?? {} });
     res.json(result);
   } catch (err) {
+    if (err?.code === 'limit_exceeded') {
+      return res.status(429).json({
+        error: 'limit_exceeded',
+        message: 'Daglig gräns nådd för denna enhet.',
+        ...err.details,
+      });
+    }
     console.error('[analytics] event failed', err);
     res.status(500).json({ error: 'Failed to record event' });
   }
+});
+
+app.get('/api/limits/check', requireApiKey, (req, res) => {
+  const deviceId = String(req.query.deviceId ?? '');
+  const type = String(req.query.type ?? '');
+  if (!deviceId || !type) {
+    return res.status(400).json({ error: 'deviceId and type required' });
+  }
+  const check = checkUsageLimit(deviceId, type);
+  res.json({
+    ...check,
+    message: check.allowed
+      ? null
+      : 'Du har nått dagens gräns. Försök igen imorgon.',
+  });
+});
+
+app.get('/api/admin/limits', requireAdmin, (_req, res) => {
+  res.json(getUsageLimits());
+});
+
+app.put('/api/admin/limits', requireAdmin, (req, res) => {
+  const { chatsPerDay, geminiPerDay, ttsPerDay } = req.body ?? {};
+  const limits = setUsageLimits({
+    chatsPerDay: chatsPerDay != null ? Number(chatsPerDay) : null,
+    geminiPerDay: geminiPerDay != null ? Number(geminiPerDay) : null,
+    ttsPerDay: ttsPerDay != null ? Number(ttsPerDay) : null,
+  });
+  res.json(limits);
 });
 
 app.post('/api/admin/login', (req, res) => {

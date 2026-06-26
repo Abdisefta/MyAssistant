@@ -27,6 +27,10 @@ async function getDeviceId(): Promise<string> {
   return id;
 }
 
+export async function getAnalyticsDeviceId(): Promise<string> {
+  return getDeviceId();
+}
+
 export async function trackAnalyticsEvent(
   type: AnalyticsEventType,
   meta?: Record<string, unknown>,

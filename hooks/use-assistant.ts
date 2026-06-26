@@ -51,6 +51,7 @@ import {
 } from '@/services/memory';
 import { recordAssistantMessage } from '@/services/usage-stats';
 import { trackAnalyticsEvent } from '@/services/analytics-sync';
+import { checkUsageAllowed } from '@/services/usage-limits';
 import { setNotificationAlertStyle } from '@/services/notification-settings';
 import { initAssistantVoice, speakAssistant } from '@/services/speech';
 import { cancelTaskReminder, scheduleTaskReminder } from '@/services/task-reminders';
@@ -320,6 +321,20 @@ export function useAssistant(userId?: string, options: UseAssistantOptions = {})
     async (text: string) => {
       const trimmed = text.trim();
       if (!trimmed || !memory || isThinking) return;
+
+      const chatLimit = await checkUsageAllowed('assistant_message');
+      if (!chatLimit.allowed) {
+        setTranscript((prev) => [
+          ...prev.filter((e) => e.id !== 'listening' && e.id !== 'partial'),
+          { id: createMessage('user', trimmed).id, role: 'user', text: trimmed },
+          {
+            id: `limit-${Date.now()}`,
+            role: 'system',
+            text: chatLimit.message ?? 'Du har nått dagens gräns. Försök igen imorgon.',
+          },
+        ]);
+        return;
+      }
 
       void recordAssistantMessage(userIdRef.current);
       void trackAnalyticsEvent('assistant_message');

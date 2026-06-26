@@ -1,3 +1,3 @@
 /** Synkad med app.json och android/app/build.gradle — används för att verifiera rätt APK. */
-export const APP_VERSION = '1.7.6';
-export const APP_VERSION_CODE = 22;
+export const APP_VERSION = '1.7.7';
+export const APP_VERSION_CODE = 23;

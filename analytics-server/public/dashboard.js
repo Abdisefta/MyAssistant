@@ -96,6 +96,18 @@ function renderOverview(data) {
     .map((r) => `<div class="row"><span>${r.platform}</span><strong>${r.count}</strong></div>`)
     .join('') || '<p class="muted">Ingen data</p>';
 
+  const limits = data.limits ?? {};
+  const form = document.getElementById('limits-form');
+  if (form) {
+    form.chatsPerDay.value = limits.chatsPerDay ?? 30;
+    form.geminiPerDay.value = limits.geminiPerDay ?? 30;
+    form.ttsPerDay.value = limits.ttsPerDay ?? 40;
+  }
+  document.getElementById('limits-summary').innerHTML = `
+    <div class="row"><span>Chattar / dag / enhet</span><strong>${limits.chatsPerDay ?? 30}</strong></div>
+    <div class="row"><span>Gemini / dag / enhet</span><strong>${limits.geminiPerDay ?? 30}</strong></div>
+    <div class="row"><span>Röst TTS / dag / enhet</span><strong>${limits.ttsPerDay ?? 40}</strong></div>`;
+
   const exp = data.expenses;
   document.getElementById('expense-summary').textContent =
     `Registrerat: ${formatSek(exp.totalRecorded)} · Månadsfast: ${formatSek(exp.monthlyRecurring)}`;
@@ -196,6 +208,20 @@ document.getElementById('expense-form').addEventListener('submit', async (e) => 
     }),
   });
   e.target.reset();
+  await refresh();
+});
+
+document.getElementById('limits-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  await api('/api/admin/limits', {
+    method: 'PUT',
+    body: JSON.stringify({
+      chatsPerDay: Number(fd.get('chatsPerDay')),
+      geminiPerDay: Number(fd.get('geminiPerDay')),
+      ttsPerDay: Number(fd.get('ttsPerDay')),
+    }),
+  });
   await refresh();
 });
 

@@ -50,6 +50,18 @@
       </section>
 
       <section class="panel">
+        <h2>Dagliga gränser per användare</h2>
+        <p class="muted">Skyddar mot höga API-kostnader. Nollställs varje natt (UTC).</p>
+        <form id="limits-form" class="expense-form">
+          <input name="chatsPerDay" type="number" min="1" max="500" placeholder="Chattar / dag" required />
+          <input name="geminiPerDay" type="number" min="1" max="500" placeholder="Gemini-anrop / dag" required />
+          <input name="ttsPerDay" type="number" min="1" max="500" placeholder="Röst (TTS) / dag" required />
+          <button type="submit">Spara gränser</button>
+        </form>
+        <div id="limits-summary" class="list"></div>
+      </section>
+
+      <section class="panel">
         <h2>Utgifter</h2>
         <p class="muted" id="expense-summary"></p>
         <form id="expense-form" class="expense-form">

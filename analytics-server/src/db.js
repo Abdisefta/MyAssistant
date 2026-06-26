@@ -44,7 +44,81 @@ db.exec(`
     recurring TEXT NOT NULL DEFAULT 'once',
     note TEXT
   );
+
+  CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
 `);
+
+const DEFAULT_LIMITS = {
+  limit_chats_day: Number(process.env.LIMIT_CHATS_DAY ?? 30),
+  limit_gemini_day: Number(process.env.LIMIT_GEMINI_DAY ?? 30),
+  limit_tts_day: Number(process.env.LIMIT_TTS_DAY ?? 40),
+};
+
+const LIMIT_KEY_FOR_TYPE = {
+  assistant_message: 'limit_chats_day',
+  gemini_request: 'limit_gemini_day',
+  tts_request: 'limit_tts_day',
+};
+
+function startOfUtcDayMs() {
+  const d = new Date();
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+}
+
+function getSetting(key, fallback) {
+  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
+  if (!row) return fallback;
+  const n = Number(row.value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+export function getUsageLimits() {
+  return {
+    chatsPerDay: getSetting('limit_chats_day', DEFAULT_LIMITS.limit_chats_day),
+    geminiPerDay: getSetting('limit_gemini_day', DEFAULT_LIMITS.limit_gemini_day),
+    ttsPerDay: getSetting('limit_tts_day', DEFAULT_LIMITS.limit_tts_day),
+  };
+}
+
+export function setUsageLimits({ chatsPerDay, geminiPerDay, ttsPerDay }) {
+  const upsert = db.prepare(
+    'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+  );
+  if (chatsPerDay != null) upsert.run('limit_chats_day', String(chatsPerDay));
+  if (geminiPerDay != null) upsert.run('limit_gemini_day', String(geminiPerDay));
+  if (ttsPerDay != null) upsert.run('limit_tts_day', String(ttsPerDay));
+  return getUsageLimits();
+}
+
+export function getDeviceUsageToday(deviceId, type) {
+  const since = startOfUtcDayMs();
+  const row = db
+    .prepare(
+      'SELECT COUNT(*) AS c FROM events WHERE device_id = ? AND type = ? AND ts >= ?',
+    )
+    .get(deviceId, type, since);
+  return row?.c ?? 0;
+}
+
+export function checkUsageLimit(deviceId, type) {
+  const limitKey = LIMIT_KEY_FOR_TYPE[type];
+  if (!limitKey) {
+    return { allowed: true, used: 0, limit: 0, type };
+  }
+  const limits = getUsageLimits();
+  const limitMap = {
+    limit_chats_day: limits.chatsPerDay,
+    limit_gemini_day: limits.geminiPerDay,
+    limit_tts_day: limits.ttsPerDay,
+  };
+  const limit = limitMap[limitKey];
+  const used = getDeviceUsageToday(deviceId, type);
+  const allowed = used < limit;
+  return { allowed, used, limit, type, limitKey };
+}
 
 const insertEvent = db.prepare(`
   INSERT INTO events (ts, type, device_id, app_version, platform, meta)
@@ -62,6 +136,16 @@ const upsertDevice = db.prepare(`
 `);
 
 export function recordEvent({ type, deviceId, appVersion, platform, meta = {} }) {
+  const billable = LIMIT_KEY_FOR_TYPE[type];
+  if (billable) {
+    const check = checkUsageLimit(deviceId, type);
+    if (!check.allowed) {
+      const err = new Error('limit_exceeded');
+      err.code = 'limit_exceeded';
+      err.details = check;
+      throw err;
+    }
+  }
   const ts = Date.now();
   const metaJson = JSON.stringify(meta);
   insertEvent.run({
@@ -209,5 +293,6 @@ export function getOverview() {
         note: 'Uppskattning baserat på användning — inte exakta fakturor.',
       },
     },
+    limits: getUsageLimits(),
   };
 }
