@@ -8,6 +8,7 @@ import {
   ANALYTICS_BASE_URL,
   isAnalyticsConfigured,
 } from '@/constants/analytics';
+import { getDeviceLocaleMeta } from '@/utils/device-locale-meta';
 
 export type AnalyticsEventType =
   | 'install'
@@ -38,6 +39,7 @@ export async function trackAnalyticsEvent(
   if (!isAnalyticsConfigured()) return;
   try {
     const deviceId = await getDeviceId();
+    const localeMeta = getDeviceLocaleMeta();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 12_000);
     await fetch(`${ANALYTICS_BASE_URL}/api/events`, {
@@ -51,9 +53,26 @@ export async function trackAnalyticsEvent(
         deviceId,
         appVersion: APP_VERSION,
         platform: Platform.OS,
-        meta: meta ?? {},
+        meta: { ...localeMeta, ...meta },
       }),
       signal: controller.signal,
+    }).then(async (res) => {
+      if (res.status === 429) {
+        const data = (await res.json().catch(() => ({}))) as {
+          used?: number;
+          limit?: number;
+          period?: 'day' | 'month' | 'budget';
+          message?: string;
+        };
+        const { reportUsageLimitHit } = await import('@/services/usage-limits');
+        reportUsageLimitHit({
+          allowed: false,
+          used: data.used ?? 0,
+          limit: data.limit ?? 0,
+          period: data.period,
+          message: data.message,
+        });
+      }
     });
     clearTimeout(timer);
   } catch {

@@ -29,6 +29,34 @@
     <main class="grid">
       <section class="cards" id="stat-cards"></section>
 
+      <section class="panel finance-panel" id="finance-section">
+        <div class="panel-head">
+          <h2>Ekonomi</h2>
+          <p class="muted">MRR, kostnader, vinst och moms — 2 månaders gratisperiod räknas inte som intäkt.</p>
+        </div>
+        <div id="finance-warnings" class="finance-warnings"></div>
+        <div class="cards finance-cards" id="finance-cards"></div>
+        <div class="finance-grid">
+          <div class="finance-block">
+            <h3>Intäkter &amp; moms</h3>
+            <div id="finance-revenue" class="list"></div>
+          </div>
+          <div class="finance-block">
+            <h3>Kostnader denna månad</h3>
+            <div id="finance-costs" class="list"></div>
+          </div>
+          <div class="finance-block">
+            <h3>Vinst &amp; marginal</h3>
+            <div id="finance-profit" class="list"></div>
+          </div>
+        </div>
+        <h3>Användare per status</h3>
+        <div id="finance-subscribers" class="list"></div>
+        <h3>Per enhet (ekonomi)</h3>
+        <p class="muted">Klicka på en rad för enhetsdetaljer. Betalande = första gången &gt; 60 dagar + aktiv senaste 30 dagarna.</p>
+        <div id="finance-devices" class="table-wrap"></div>
+      </section>
+
       <section class="panel">
         <h2>Nedladdningar / nya enheter (30 dagar)</h2>
         <div id="install-chart" class="chart"></div>
@@ -50,12 +78,17 @@
       </section>
 
       <section class="panel">
-        <h2>Dagliga gränser per användare</h2>
-        <p class="muted">Skyddar mot höga API-kostnader. Nollställs varje natt (UTC).</p>
+        <h2>Kostnadsgränser per användare</h2>
+        <p class="muted">Mål: max <strong>35 kr/mån</strong> kostnad vid pris <strong>199 kr</strong> → ~82% marginal.</p>
         <form id="limits-form" class="expense-form">
-          <input name="chatsPerDay" type="number" min="1" max="500" placeholder="Chattar / dag" required />
-          <input name="geminiPerDay" type="number" min="1" max="500" placeholder="Gemini-anrop / dag" required />
-          <input name="ttsPerDay" type="number" min="1" max="500" placeholder="Röst (TTS) / dag" required />
+          <input name="chatsPerDay" type="number" min="1" max="200" placeholder="Chattar / dag" required />
+          <input name="geminiPerDay" type="number" min="1" max="200" placeholder="Gemini / dag" required />
+          <input name="ttsPerDay" type="number" min="1" max="200" placeholder="Röst / dag" required />
+          <input name="chatsPerMonth" type="number" min="1" max="5000" placeholder="Chattar / månad" required />
+          <input name="geminiPerMonth" type="number" min="1" max="5000" placeholder="Gemini / månad" required />
+          <input name="ttsPerMonth" type="number" min="1" max="5000" placeholder="Röst / månad" required />
+          <input name="monthlyBudgetSek" type="number" step="0.01" min="1" placeholder="Max kr / månad / användare" required />
+          <input name="targetPriceSek" type="number" step="1" min="1" placeholder="Ditt pris (kr)" required />
           <button type="submit">Spara gränser</button>
         </form>
         <div id="limits-summary" class="list"></div>
@@ -84,7 +117,13 @@
       </section>
 
       <section class="panel">
+        <h2>Mest aktiva enheter (denna månad)</h2>
+        <div id="top-devices" class="table-wrap"></div>
+      </section>
+
+      <section class="panel">
         <h2>Senaste enheter</h2>
+        <p class="muted">Klicka på en rad för detaljer (land, användning, kostnad).</p>
         <div id="device-list" class="table-wrap"></div>
       </section>
 
@@ -97,7 +136,23 @@
         <h2>Uppskattade API-kostnader (7 dagar)</h2>
         <div id="cost-estimate" class="list"></div>
       </section>
+
+      <section class="panel half">
+        <h2>Kostantaganden</h2>
+        <div id="cost-assumptions" class="list"></div>
+      </section>
     </main>
+  </div>
+
+  <div id="device-modal" class="modal hidden" aria-hidden="true">
+    <div class="modal-backdrop" id="device-modal-backdrop"></div>
+    <div class="modal-card" role="dialog" aria-labelledby="device-modal-title">
+      <header class="modal-header">
+        <h2 id="device-modal-title">Enhetsdetaljer</h2>
+        <button type="button" id="device-modal-close" class="ghost">Stäng</button>
+      </header>
+      <div id="device-modal-body" class="modal-body"></div>
+    </div>
   </div>
 
   <script src="/dashboard.js"></script>

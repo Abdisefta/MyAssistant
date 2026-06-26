@@ -4,8 +4,7 @@ import {
   getGeminiApiKeyCandidates,
   validateGeminiApiKey,
 } from '@/constants/gemini';
-import { trackAnalyticsEvent } from '@/services/analytics-sync';
-import { checkUsageAllowed } from '@/services/usage-limits';
+import { checkUsageAllowed, recordBillableUsage, UsageLimitExceededError } from '@/services/usage-limits';
 import type { ConversationMessage } from '@/types/memory';
 
 type GeminiRole = 'user' | 'model';
@@ -142,7 +141,7 @@ async function callGemini(
 ): Promise<string> {
   const geminiLimit = await checkUsageAllowed('gemini_request');
   if (!geminiLimit.allowed) {
-    throw new Error(geminiLimit.message ?? 'Du har nått dagens gräns för AI. Försök igen imorgon.');
+    throw new UsageLimitExceededError(geminiLimit);
   }
 
   const candidates = getGeminiApiKeyCandidates();
@@ -161,7 +160,7 @@ async function callGemini(
     for (const model of GEMINI_MODELS) {
       try {
         const text = await callGeminiOnce(model, apiKey, systemInstruction, contents);
-        void trackAnalyticsEvent('gemini_request', { model });
+        void recordBillableUsage('gemini_request', { model });
         return text;
       } catch (err) {
         lastError = err instanceof Error ? err : new Error(String(err));

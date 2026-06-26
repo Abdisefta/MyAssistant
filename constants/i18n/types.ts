@@ -181,6 +181,18 @@ export type Translations = {
     gmailNotConnected: string;
     genericError: string;
   };
+  upgrade: {
+    title: string;
+    subtitle: string;
+    planLabel: string;
+    planHint: string;
+    comingSoon: string;
+    close: string;
+    periodDay: string;
+    periodMonth: string;
+    periodBudget: string;
+    limitDetail: string;
+  };
 };
 
 export type TranslationKey = keyof Translations;

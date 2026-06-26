@@ -18,6 +18,7 @@ import { EmailTab } from '@/components/email-tab';
 import GoogleLogin from '@/components/GoogleLogin';
 import { HomeTab } from '@/components/home-tab';
 import { OnboardingModal } from '@/components/onboarding-modal';
+import { UpgradeModal } from '@/components/upgrade-modal';
 import { TasksTab } from '@/components/tasks-tab';
 import { APP_COLORS as COLORS } from '@/constants/app-theme';
 import { APP_VERSION } from '@/constants/app-version';
@@ -36,6 +37,7 @@ import { setLocalCalendarUserId, migrateLegacyCalendarEvents } from '@/services/
 import { bootstrapAppPermissions } from '@/services/app-permissions';
 import { recordAppOpen, recordUsageMinute } from '@/services/usage-stats';
 import { trackAppLaunch } from '@/services/analytics-sync';
+import { onUsageLimitHit, type UsageCheckResult } from '@/services/usage-limits';
 import type { NotificationAlertStyle } from '@/types/memory';
 
 type TabId = 'hem' | 'email' | 'kalender' | 'assistent' | 'uppgifter' | 'installningar';
@@ -273,6 +275,8 @@ export default function HomeScreen() {
   const [inputText, setInputText] = useState('');
   const [googleUser, setGoogleUser] = useState<GoogleUserSession | null>(null);
   const [composeOpen, setComposeOpen] = useState(false);
+  const [upgradeCheck, setUpgradeCheck] = useState<UsageCheckResult | null>(null);
+  const [showUpgrade, setShowUpgrade] = useState(false);
   const hideNavBar = composeOpen;
 
   const googleUserRef = useRef<GoogleUserSession | null>(null);
@@ -329,6 +333,13 @@ export default function HomeScreen() {
       void recordUsageMinute(GUEST_USER_ID);
     }, 60_000);
     return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    return onUsageLimitHit((check) => {
+      setUpgradeCheck(check);
+      setShowUpgrade(true);
+    });
   }, []);
 
   useEffect(() => {
@@ -562,6 +573,11 @@ export default function HomeScreen() {
         isSubmitting={isThinking}
         initialName={googleUser?.name?.split(' ')[0] ?? ''}
         onComplete={completeOnboarding}
+      />
+      <UpgradeModal
+        visible={showUpgrade}
+        check={upgradeCheck}
+        onClose={() => setShowUpgrade(false)}
       />
     </SafeAreaView>
   );

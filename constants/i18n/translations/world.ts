@@ -23,6 +23,7 @@ function pick(
     calendar: { ...en.calendar, ...partial?.calendar },
     notifications: { ...en.notifications, ...partial?.notifications },
     agent: { ...en.agent, ...partial?.agent },
+    upgrade: { ...en.upgrade, ...partial?.upgrade },
     gemini: {
       ...en.gemini,
       replyLanguage: geminiLang,

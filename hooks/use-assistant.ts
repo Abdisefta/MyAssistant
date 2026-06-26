@@ -50,8 +50,7 @@ import {
   clearConversationHistory,
 } from '@/services/memory';
 import { recordAssistantMessage } from '@/services/usage-stats';
-import { trackAnalyticsEvent } from '@/services/analytics-sync';
-import { checkUsageAllowed } from '@/services/usage-limits';
+import { checkUsageAllowed, isUsageLimitError, isUsageLimitMessage, recordBillableUsage } from '@/services/usage-limits';
 import { setNotificationAlertStyle } from '@/services/notification-settings';
 import { initAssistantVoice, speakAssistant } from '@/services/speech';
 import { cancelTaskReminder, scheduleTaskReminder } from '@/services/task-reminders';
@@ -337,7 +336,7 @@ export function useAssistant(userId?: string, options: UseAssistantOptions = {})
       }
 
       void recordAssistantMessage(userIdRef.current);
-      void trackAnalyticsEvent('assistant_message');
+      void recordBillableUsage('assistant_message');
 
       const userMessage = createMessage('user', trimmed);
       const historyWithUser = [...memory.conversationHistory, userMessage];
@@ -667,9 +666,20 @@ export function useAssistant(userId?: string, options: UseAssistantOptions = {})
 
         await finishReply(memory, historyWithUser, reply, trimmed);
       } catch (error) {
+        if (isUsageLimitError(error)) {
+          const msg = error.check.message ?? 'Du har nått gränsen.';
+          setTranscript((prev) => [
+            ...prev.filter((e) => e.id !== 'thinking'),
+            { id: `limit-${Date.now()}`, role: 'system', text: msg },
+          ]);
+          setIsThinking(false);
+          return;
+        }
         const raw =
           error instanceof Error ? error.message : strings.agent.genericError;
-        const { display, speak: speakText } = toUserFacingGeminiError(raw);
+        const { display, speak: speakText } = isUsageLimitMessage(raw)
+          ? { display: raw, speak: raw }
+          : toUserFacingGeminiError(raw);
 
         setTranscript((prev) => [
           ...prev.filter((e) => e.id !== 'thinking'),

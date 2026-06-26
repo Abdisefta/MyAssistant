@@ -9,8 +9,7 @@ import {
   ALMA_TTS_REQUEST_TIMEOUT_MS,
   ALMA_TTS_RETRY_DELAY_MS,
 } from '@/constants/alma-tts';
-import { trackAnalyticsEvent } from '@/services/analytics-sync';
-import { checkUsageAllowed } from '@/services/usage-limits';
+import { checkUsageAllowed, recordBillableUsage, UsageLimitExceededError } from '@/services/usage-limits';
 
 let currentSound: Audio.Sound | null = null;
 let playbackGeneration = 0;
@@ -119,7 +118,7 @@ export async function fetchAlmaSpeechAudio(text: string): Promise<Uint8Array> {
   }
   const ttsLimit = await checkUsageAllowed('tts_request');
   if (!ttsLimit.allowed) {
-    throw new Error(ttsLimit.message ?? 'Du har nått dagens gräns för röst. Försök igen imorgon.');
+    throw new UsageLimitExceededError(ttsLimit);
   }
   if (trimmed.length > ALMA_TTS_MAX_CHARS) {
     throw new Error(`Texten är för lång (max ${ALMA_TTS_MAX_CHARS} tecken).`);
@@ -131,7 +130,7 @@ export async function fetchAlmaSpeechAudio(text: string): Promise<Uint8Array> {
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
       const audio = await fetchAlmaSpeechAudioOnce(trimmed);
-      void trackAnalyticsEvent('tts_request', { chars: trimmed.length });
+      void recordBillableUsage('tts_request', { chars: trimmed.length });
       return audio;
     } catch (err) {
       lastError = formatAlmaFetchError(err);

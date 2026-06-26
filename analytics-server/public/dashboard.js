@@ -45,8 +45,89 @@ function formatDate(ts) {
   return new Date(ts).toLocaleString('sv-SE');
 }
 
-function formatSek(n) {
-  return `${Number(n).toLocaleString('sv-SE', { maximumFractionDigits: 0 })} kr`;
+function formatSek(n, decimals = 0) {
+  return `${Number(n).toLocaleString('sv-SE', { maximumFractionDigits: decimals, minimumFractionDigits: decimals })} kr`;
+}
+
+function statusBadge(status) {
+  const labels = {
+    paying: 'Betalande',
+    trial: 'Gratisperiod',
+    paying_inactive: 'Betalande (inaktiv)',
+    trial_inactive: 'Trial (inaktiv)',
+  };
+  return `<span class="status-badge ${status}">${labels[status] ?? status}</span>`;
+}
+
+function renderFinance(data) {
+  if (!data) return;
+
+  const warningsEl = document.getElementById('finance-warnings');
+  warningsEl.innerHTML = (data.warnings ?? [])
+    .map((w) => `<div class="finance-warning ${w.level}">${w.text}</div>`)
+    .join('');
+
+  const profit = data.profit?.inklMoms ?? 0;
+  const mrr = data.revenue?.mrrGrossInklMoms ?? 0;
+  document.getElementById('finance-cards').innerHTML = [
+    ['MRR (inkl. moms)', formatSek(mrr), 'neutral'],
+    ['Betalande / trial', `${data.subscribers?.paying ?? 0} / ${data.subscribers?.trial ?? 0}`, 'neutral'],
+    ['API-kostnad / mån', formatSek(data.costs?.estimatedApiMonth ?? 0), 'negative'],
+    ['Utgifter / mån', formatSek(data.costs?.recordedExpensesMonth ?? 0), 'negative'],
+    ['Uppskattad vinst', formatSek(profit), profit >= 0 ? 'positive' : 'negative'],
+    ['Marginal', data.profit?.marginPercent != null ? `${data.profit.marginPercent}%` : '—', profit >= 0 ? 'positive' : 'negative'],
+  ]
+    .map(
+      ([label, value, tone]) =>
+        `<div class="card ${tone}"><div class="value">${value}</div><div class="label">${label}</div></div>`,
+    )
+    .join('');
+
+  document.getElementById('finance-revenue').innerHTML = `
+    <div class="row"><span>MRR inkl. moms</span><strong>${formatSek(data.revenue?.mrrGrossInklMoms ?? 0)}</strong></div>
+    <div class="row"><span>Varav moms (25%)</span><strong>${formatSek(data.revenue?.momsAmount ?? 0)}</strong></div>
+    <div class="row"><span>Netto exkl. moms</span><strong>${formatSek(data.revenue?.mrrNetExMoms ?? 0)}</strong></div>
+    <div class="row"><span>Pris / betalande</span><strong>${formatSek(data.targetPriceSek ?? 199)}</strong></div>
+    <p class="muted">${data.revenue?.note ?? ''}</p>`;
+
+  document.getElementById('finance-costs').innerHTML = `
+    <div class="row"><span>Variabel API (Gemini + TTS)</span><strong>${formatSek(data.costs?.estimatedApiMonth ?? 0)}</strong></div>
+    <div class="row"><span>Fasta utgifter (månadsvis)</span><strong>${formatSek(data.costs?.monthlyRecurring ?? 0)}</strong></div>
+    <div class="row"><span>Engångsutgifter (denna månad)</span><strong>${formatSek(data.costs?.oneTimeThisMonth ?? 0)}</strong></div>
+    <div class="row"><span>Totalt kostnader</span><strong>${formatSek(data.costs?.total ?? 0)}</strong></div>
+    <p class="muted">Lägg till Hetzner m.m. under Utgifter nedan. API-kostnad räknas på aktiva enheter denna månad.</p>`;
+
+  document.getElementById('finance-profit').innerHTML = `
+    <div class="row"><span>Vinst inkl. moms</span><strong class="${profit >= 0 ? 'status-ok' : 'status-bad'}">${formatSek(profit)}</strong></div>
+    <div class="row"><span>Vinst exkl. moms</span><strong>${formatSek(data.profit?.exMoms ?? 0)}</strong></div>
+    <div class="row"><span>Bruttomarginal</span><strong>${data.profit?.marginPercent != null ? `${data.profit.marginPercent}%` : '—'}</strong></div>
+    <div class="row"><span>Gratisperiod</span><strong>${data.trialDays ?? 60} dagar</strong></div>`;
+
+  const sub = data.subscribers ?? {};
+  document.getElementById('finance-subscribers').innerHTML = `
+    <div class="row"><span>Betalande (aktiva)</span><strong>${sub.paying ?? 0}</strong></div>
+    <div class="row"><span>Gratisperiod (aktiva)</span><strong>${sub.trial ?? 0}</strong></div>
+    <div class="row"><span>Betalande men inaktiva (30d)</span><strong>${sub.payingInactive ?? 0}</strong></div>
+    <div class="row"><span>Trial inaktiva</span><strong>${sub.trialInactive ?? 0}</strong></div>
+    <div class="row"><span>Totalt enheter</span><strong>${sub.totalDevices ?? 0}</strong></div>`;
+
+  document.getElementById('finance-devices').innerHTML = `<table>
+    <thead><tr><th>Enhet</th><th>Status</th><th>Land</th><th>API / mån</th><th>Intäkt</th><th>Trial kvar</th><th>Senast</th></tr></thead>
+    <tbody>${(data.devices ?? [])
+      .map(
+        (d) => `<tr class="clickable" data-device-id="${d.device_id}">
+          <td>${d.device_id.slice(0, 8)}…</td>
+          <td>${statusBadge(d.status)}</td>
+          <td>${d.country ?? '—'}</td>
+          <td>${formatSek(d.apiCostMonth, 2)}</td>
+          <td>${d.revenueSek > 0 ? formatSek(d.revenueSek) : '—'}</td>
+          <td>${d.trialDaysLeft > 0 ? `${d.trialDaysLeft} d` : '—'}</td>
+          <td>${formatDate(d.last_seen)}</td>
+        </tr>`,
+      )
+      .join('')}</tbody></table>` || '<p class="muted">Inga enheter ännu</p>';
+
+  bindDeviceClicks();
 }
 
 function renderChart(containerId, chartData) {
@@ -64,6 +145,74 @@ function renderChart(containerId, chartData) {
       return `<div class="bar-wrap" title="${day}: ${value}"><div class="bar" style="height:${h}px"></div><span class="bar-label">${label}</span></div>`;
     })
     .join('');
+}
+
+function countryLabel(code) {
+  if (!code) return '—';
+  try {
+    return `${code} — ${new Intl.DisplayNames(['sv'], { type: 'region' }).of(code) ?? code}`;
+  } catch {
+    return code;
+  }
+}
+
+async function openDeviceModal(deviceId) {
+  const modal = document.getElementById('device-modal');
+  const body = document.getElementById('device-modal-body');
+  body.innerHTML = '<p class="muted">Laddar…</p>';
+  modal.classList.remove('hidden');
+  modal.setAttribute('aria-hidden', 'false');
+  try {
+    const data = await api(`/api/admin/devices/${encodeURIComponent(deviceId)}`);
+    const d = data.device;
+    const u = data.usage ?? {};
+    body.innerHTML = `
+      <p class="device-id-mono">${d.device_id}</p>
+      <div class="section-title">Plats &amp; språk</div>
+      <div class="row"><span>Land</span><strong>${countryLabel(d.country)}</strong></div>
+      <div class="row"><span>Locale</span><strong>${d.locale ?? '—'}</strong></div>
+      <div class="row"><span>Tidszon</span><strong>${d.timezone ?? '—'}</strong></div>
+      <div class="section-title">Enhet</div>
+      <div class="row"><span>Plattform</span><strong>${d.platform ?? '—'}</strong></div>
+      <div class="row"><span>App-version</span><strong>${d.app_version ?? '—'}</strong></div>
+      <div class="row"><span>Öppningar totalt</span><strong>${d.opens}</strong></div>
+      <div class="row"><span>Första gången</span><strong>${formatDate(d.first_seen)}</strong></div>
+      <div class="row"><span>Senast aktiv</span><strong>${formatDate(d.last_seen)}</strong></div>
+      <div class="section-title">Användning denna månad</div>
+      <div class="row"><span>Chattar</span><strong>${u.assistant_message?.month ?? 0}</strong></div>
+      <div class="row"><span>Gemini-anrop</span><strong>${u.gemini_request?.month ?? 0}</strong></div>
+      <div class="row"><span>TTS / röst</span><strong>${u.tts_request?.month ?? 0}</strong></div>
+      <div class="row"><span>App-öppningar</span><strong>${u.app_open?.month ?? 0}</strong></div>
+      <div class="section-title">Abonnemang</div>
+      <div class="row"><span>Status</span><strong>${statusBadge(data.subscription?.status ?? 'trial')}</strong></div>
+      ${data.subscription?.trialDaysLeft > 0 ? `<div class="row"><span>Gratisperiod kvar</span><strong>${data.subscription.trialDaysLeft} dagar</strong></div>` : ''}
+      ${data.subscription?.revenueSek > 0 ? `<div class="row"><span>Intäkt / mån</span><strong>${formatSek(data.subscription.revenueSek)}</strong></div>` : ''}
+      <div class="section-title">Kostnad &amp; gränser</div>
+      <div class="row"><span>Uppskattad kostnad / månad</span><strong>${data.costMonth} / ${data.budget} kr</strong></div>
+      <div class="row"><span>Idag (chatt / gemini / tts)</span><strong>${u.assistant_message?.today ?? 0} / ${u.gemini_request?.today ?? 0} / ${u.tts_request?.today ?? 0}</strong></div>
+      <div class="section-title">Senaste händelser</div>
+      ${(data.recentEvents ?? [])
+        .slice(0, 10)
+        .map(
+          (e) =>
+            `<div class="row"><span>${e.type}</span><span class="muted">${formatDate(e.ts)}</span></div>`,
+        )
+        .join('') || '<p class="muted">Inga händelser</p>'}`;
+  } catch (err) {
+    body.innerHTML = `<p class="error">${err.message ?? 'Kunde inte ladda enhet'}</p>`;
+  }
+}
+
+function closeDeviceModal() {
+  const modal = document.getElementById('device-modal');
+  modal.classList.add('hidden');
+  modal.setAttribute('aria-hidden', 'true');
+}
+
+function bindDeviceClicks() {
+  document.querySelectorAll('[data-device-id]').forEach((row) => {
+    row.addEventListener('click', () => openDeviceModal(row.dataset.deviceId));
+  });
 }
 
 function renderOverview(data) {
@@ -99,14 +248,27 @@ function renderOverview(data) {
   const limits = data.limits ?? {};
   const form = document.getElementById('limits-form');
   if (form) {
-    form.chatsPerDay.value = limits.chatsPerDay ?? 30;
-    form.geminiPerDay.value = limits.geminiPerDay ?? 30;
-    form.ttsPerDay.value = limits.ttsPerDay ?? 40;
+    form.chatsPerDay.value = limits.chatsPerDay ?? 15;
+    form.geminiPerDay.value = limits.geminiPerDay ?? 15;
+    form.ttsPerDay.value = limits.ttsPerDay ?? 20;
+    form.chatsPerMonth.value = limits.chatsPerMonth ?? 400;
+    form.geminiPerMonth.value = limits.geminiPerMonth ?? 400;
+    form.ttsPerMonth.value = limits.ttsPerMonth ?? 500;
+    form.monthlyBudgetSek.value = limits.monthlyBudgetSek ?? 35;
+    form.targetPriceSek.value = limits.targetPriceSek ?? 199;
   }
+  const margin =
+    limits.targetPriceSek && limits.monthlyBudgetSek
+      ? Math.round((1 - limits.monthlyBudgetSek / limits.targetPriceSek) * 100)
+      : 82;
   document.getElementById('limits-summary').innerHTML = `
-    <div class="row"><span>Chattar / dag / enhet</span><strong>${limits.chatsPerDay ?? 30}</strong></div>
-    <div class="row"><span>Gemini / dag / enhet</span><strong>${limits.geminiPerDay ?? 30}</strong></div>
-    <div class="row"><span>Röst TTS / dag / enhet</span><strong>${limits.ttsPerDay ?? 40}</strong></div>`;
+    <div class="row"><span>Chattar / dag</span><strong>${limits.chatsPerDay ?? 15}</strong></div>
+    <div class="row"><span>Gemini / dag</span><strong>${limits.geminiPerDay ?? 15}</strong></div>
+    <div class="row"><span>Röst / dag</span><strong>${limits.ttsPerDay ?? 20}</strong></div>
+    <div class="row"><span>Chattar / månad</span><strong>${limits.chatsPerMonth ?? 400}</strong></div>
+    <div class="row"><span>Max kostnad / månad</span><strong>${limits.monthlyBudgetSek ?? 35} kr</strong></div>
+    <div class="row"><span>Ditt pris</span><strong>${limits.targetPriceSek ?? 199} kr</strong></div>
+    <div class="row"><span>Uppskattad marginal</span><strong>${margin}%</strong></div>`;
 
   const exp = data.expenses;
   document.getElementById('expense-summary').textContent =
@@ -130,12 +292,29 @@ function renderOverview(data) {
     });
   });
 
+  document.getElementById('top-devices').innerHTML = `<table>
+    <thead><tr><th>Enhet</th><th>Land</th><th>Plattform</th><th>Chattar</th><th>Gemini</th><th>TTS</th><th>Senast</th></tr></thead>
+    <tbody>${(data.topDevices ?? [])
+      .map(
+        (d) => `<tr class="clickable" data-device-id="${d.device_id}">
+          <td>${d.device_id.slice(0, 8)}…</td>
+          <td>${d.country ?? '—'}</td>
+          <td>${d.platform ?? '—'}</td>
+          <td>${d.chats_month ?? 0}</td>
+          <td>${d.gemini_month ?? 0}</td>
+          <td>${d.tts_month ?? 0}</td>
+          <td>${formatDate(d.last_seen)}</td>
+        </tr>`,
+      )
+      .join('')}</tbody></table>` || '<p class="muted">Ingen data ännu</p>';
+
   document.getElementById('device-list').innerHTML = `<table>
-    <thead><tr><th>Enhet</th><th>Version</th><th>Öppningar</th><th>Senast aktiv</th></tr></thead>
+    <thead><tr><th>Enhet</th><th>Land</th><th>Version</th><th>Öppningar</th><th>Senast aktiv</th></tr></thead>
     <tbody>${(data.recentDevices ?? [])
       .map(
-        (d) => `<tr>
+        (d) => `<tr class="clickable" data-device-id="${d.device_id}">
           <td>${d.device_id.slice(0, 8)}…</td>
+          <td>${d.country ?? '—'}</td>
           <td>${d.app_version ?? '—'}</td>
           <td>${d.opens}</td>
           <td>${formatDate(d.last_seen)}</td>
@@ -143,10 +322,23 @@ function renderOverview(data) {
       )
       .join('')}</tbody></table>`;
 
+  bindDeviceClicks();
+
+  const est = data.expenses?.estimated ?? {};
   document.getElementById('cost-estimate').innerHTML = `
-    <div class="row"><span>Gemini (uppskattning)</span><strong>${formatSek(exp.estimated.geminiWeekSek)}</strong></div>
-    <div class="row"><span>TTS (uppskattning)</span><strong>${formatSek(exp.estimated.ttsWeekSek)}</strong></div>
-    <p class="muted">${exp.estimated.note}</p>`;
+    <div class="row"><span>Gemini (7d)</span><strong>${formatSek(est.geminiWeekSek ?? 0)}</strong></div>
+    <div class="row"><span>TTS Alma (7d)</span><strong>${formatSek(est.ttsWeekSek ?? 0)}</strong></div>
+    <div class="row"><span>Per Gemini-anrop</span><strong>${est.geminiPerRequestSek ?? 0.06} kr</strong></div>
+    <div class="row"><span>Per TTS-anrop</span><strong>${est.ttsPerRequestSek ?? 0.002} kr</strong></div>
+    <p class="muted">${est.note ?? ''}</p>`;
+
+  const ca = data.costAssumptions ?? {};
+  document.getElementById('cost-assumptions').innerHTML = `
+    <div class="row"><span>Gemini / anrop</span><strong>${ca.geminiPerRequestSek ?? 0.06} kr</strong></div>
+    <div class="row"><span>Alma TTS / anrop</span><strong>${ca.ttsPerRequestSek ?? 0.002} kr</strong></div>
+    <div class="row"><span>Budget / enhet / mån</span><strong>${ca.monthlyBudgetPerDeviceSek ?? 35} kr</strong></div>
+    <div class="row"><span>Abonnemang (mål)</span><strong>${ca.targetPriceSek ?? 199} kr</strong></div>
+    <p class="muted">${ca.hetznerNote ?? ''}</p>`;
 }
 
 async function renderServerStatus() {
@@ -164,8 +356,12 @@ async function renderServerStatus() {
 }
 
 async function refresh() {
-  const data = await api('/api/admin/overview');
-  renderOverview(data);
+  const [overview, finance] = await Promise.all([
+    api('/api/admin/overview'),
+    api('/api/admin/finance'),
+  ]);
+  renderOverview(overview);
+  renderFinance(finance);
   await renderServerStatus();
 }
 
@@ -220,6 +416,11 @@ document.getElementById('limits-form').addEventListener('submit', async (e) => {
       chatsPerDay: Number(fd.get('chatsPerDay')),
       geminiPerDay: Number(fd.get('geminiPerDay')),
       ttsPerDay: Number(fd.get('ttsPerDay')),
+      chatsPerMonth: Number(fd.get('chatsPerMonth')),
+      geminiPerMonth: Number(fd.get('geminiPerMonth')),
+      ttsPerMonth: Number(fd.get('ttsPerMonth')),
+      monthlyBudgetSek: Number(fd.get('monthlyBudgetSek')),
+      targetPriceSek: Number(fd.get('targetPriceSek')),
     }),
   });
   await refresh();
@@ -231,6 +432,9 @@ if (token()) {
 } else {
   showLogin();
 }
+
+document.getElementById('device-modal-close')?.addEventListener('click', closeDeviceModal);
+document.getElementById('device-modal-backdrop')?.addEventListener('click', closeDeviceModal);
 
 setInterval(() => {
   if (token()) refresh().catch(() => {});

@@ -2,7 +2,7 @@
   "expo": {
     "name": "My Assistant",
     "slug": "MyAssistantFinal",
-    "version": "1.7.7",
+    "version": "1.7.8",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "myassistantfinal",

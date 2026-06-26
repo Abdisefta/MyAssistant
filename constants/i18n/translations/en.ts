@@ -158,4 +158,16 @@ export const en: Translations = {
     gmailNotConnected: 'Gmail not connected.',
     genericError: 'Something went wrong. Try again.',
   },
+  upgrade: {
+    title: 'Upgrade your plan',
+    subtitle: 'You have reached the free usage limit. Upgrade for unlimited access.',
+    planLabel: 'My Assistant Pro',
+    planHint: 'More chats, voice, and AI — subscription coming soon.',
+    comingSoon: 'Coming soon — stay tuned',
+    close: 'Not now',
+    periodDay: 'today',
+    periodMonth: 'this month',
+    periodBudget: 'cost budget',
+    limitDetail: 'Used {{used}} of {{limit}} ({{period}}).',
+  },
 };

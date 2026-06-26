@@ -160,6 +160,18 @@ export const sv: Translations = {
     gmailNotConnected: 'Gmail inte kopplat.',
     genericError: 'Något gick fel. Försök igen.',
   },
+  upgrade: {
+    title: 'Uppgradera ditt paket',
+    subtitle: 'Du har nått gränsen för gratis användning. Uppgradera för mer tillgång.',
+    planLabel: 'My Assistant Pro',
+    planHint: 'Fler chattar, röst och AI — abonnemang kommer snart.',
+    comingSoon: 'Kommer snart — håll utkik',
+    close: 'Inte nu',
+    periodDay: 'idag',
+    periodMonth: 'denna månad',
+    periodBudget: 'kostnadsbudget',
+    limitDetail: 'Använt {{used}} av {{limit}} ({{period}}).',
+  },
 };
 
 export const fi: Translations = {
@@ -177,6 +189,7 @@ export const fi: Translations = {
   calendar: { today: 'Tänään', tomorrow: 'Huomenna', allDay: 'Koko päivä', permissionTitle: 'Kalenterioikeus tarvitaan', permissionText: 'Salli pääsy näyttääksesi tapaamiset.', allowAccess: 'Salli kalenteri', openSettings: 'Avaa asetukset', loadError: 'Kalenteria ei voitu lukea.', emptyDay: 'Ei suunnitelmia. Lisää tapaaminen.', platformHint: 'Tapaamiset tallennetaan sovellukseen ja puhelimeen.', bookedSuccess: 'Tapaaminen tallennettu: {{day}}.', meetingSoon: 'Tapaaminen pian', meetingBody: '{{title}} alkaa {{minutes}} min kuluttua ({{time}})' },
   notifications: { taskTitle: 'Muistutus', meetingsChannel: 'Tapaamiset', tasksChannel: 'Tehtävät' },
   agent: { bookingCancelled: 'OK, en varannut kalenteriin.', emailCancelled: 'OK, en lähettänyt sähköpostia.', pendingBooking: 'Odottava varaus: {{summary}}. Sano "kyllä" tai "varaa".', pendingEmail: 'Odottava viesti. Sano "lähetä" tai "peruuta".', gmailRequiredSend: 'Yhdistä Google Mail ensin.', gmailRequiredEmail: 'Yhdistä Google Mail Email-välilehdellä.', calendarLoadError: 'Kalenteritietoja ei saatu.', gmailLoadError: 'Gmailia ei voitu lukea.', gmailNotConnected: 'Gmail ei yhdistetty.', genericError: 'Jotain meni pieleen.' },
+  upgrade: sv.upgrade,
 };
 
 export const da: Translations = {
@@ -194,6 +207,7 @@ export const da: Translations = {
   calendar: { today: 'I dag', tomorrow: 'I morgen', allDay: 'Hele dagen', permissionTitle: 'Kalendertilladelse kræves', permissionText: 'Tillad adgang for at vise møder.', allowAccess: 'Tillad kalender', openSettings: 'Åbn indstillinger', loadError: 'Kunne ikke læse kalender.', emptyDay: 'Intet planlagt. Tryk Book møde.', platformHint: 'Møder gemmes i appen og på telefonen.', bookedSuccess: 'Møde gemt for {{day}}.', meetingSoon: 'Møde snart', meetingBody: '{{title}} starter om {{minutes}} min ({{time}})' },
   notifications: { taskTitle: 'Påmindelse', meetingsChannel: 'Møder', tasksChannel: 'Opgaver' },
   agent: { bookingCancelled: 'OK, jeg bookede ikke i kalenderen.', emailCancelled: 'OK, jeg sendte ikke mailen.', pendingBooking: 'Afventende booking: {{summary}}. Sig "ja" eller "book".', pendingEmail: 'Afventende mail. Sig "send" eller "annuller".', gmailRequiredSend: 'Forbind Google Mail først.', gmailRequiredEmail: 'Forbind Google Mail under Email.', calendarLoadError: 'Kalenderinfo kunne ikke hentes.', gmailLoadError: 'Gmail kunne ikke læses.', gmailNotConnected: 'Gmail ikke forbundet.', genericError: 'Noget gik galt.' },
+  upgrade: sv.upgrade,
 };
 
 export const no: Translations = {
@@ -211,4 +225,5 @@ export const no: Translations = {
   calendar: { today: 'I dag', tomorrow: 'I morgen', allDay: 'Hele dagen', permissionTitle: 'Kalendertillatelse kreves', permissionText: 'Tillat tilgang for å vise møter.', allowAccess: 'Tillat kalender', openSettings: 'Åpne innstillinger', loadError: 'Kunne ikke lese kalender.', emptyDay: 'Ingenting planlagt. Trykk Book møte.', platformHint: 'Møter lagres i appen og på telefonen.', bookedSuccess: 'Møte lagret for {{day}}.', meetingSoon: 'Møte snart', meetingBody: '{{title}} starter om {{minutes}} min ({{time}})' },
   notifications: { taskTitle: 'Påminnelse', meetingsChannel: 'Møter', tasksChannel: 'Oppgaver' },
   agent: { bookingCancelled: 'OK, jeg booket ikke i kalenderen.', emailCancelled: 'OK, jeg sendte ikke e-posten.', pendingBooking: 'Ventende booking: {{summary}}. Si "ja" eller "book".', pendingEmail: 'Ventende e-post. Si "send" eller "avbryt".', gmailRequiredSend: 'Koble til Google Mail først.', gmailRequiredEmail: 'Koble til Google Mail under E-post.', calendarLoadError: 'Kalenderinfo kunne ikke hentes.', gmailLoadError: 'Gmail kunne ikke leses.', gmailNotConnected: 'Gmail ikke koblet til.', genericError: 'Noe gikk galt.' },
+  upgrade: sv.upgrade,
 };

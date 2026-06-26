@@ -17,13 +17,22 @@ Senast uppdaterad: 2025-06-25
 
 ## Admin-dashboard
 
-Webb-UI för dig: användare, nedladdningar, utgifter, serverstatus.
+Webb-UI för dig: användare, nedladdningar, utgifter, serverstatus, **ekonomi**.
 
 1. Deploy på Hetzner: se `analytics-server/README.md`
 2. Öppna `http://195.201.128.118:3002` (efter deploy + port 3002 öppen)
 3. Bygg app v1.7.6+ så telefonen skickar statistik
 
 Standardlösenord byts i `.env` på servern (`ADMIN_PASSWORD`).
+
+### Ekonomi-fliken (dashboard)
+
+- **Gratisperiod:** 60 dagar från `first_seen` — räknas inte som intäkt
+- **Betalande:** efter 60 dagar + aktiv senaste 30 dagarna → MRR = antal × `targetPriceSek` (199 kr)
+- **Moms:** pris antas inkl. 25% moms (B2C) — visar netto, moms och brutto
+- **Kostnader:** variabel API (Gemini/TTS) + registrerade utgifter (Hetzner m.m.)
+- **Vinst:** MRR − API − utgifter, med marginalvarning om låg
+- Lägg till fasta kostnader under **Utgifter** (t.ex. Hetzner VPS som månadsvis)
 
 ## Bygg ny APK (Windows)
 
