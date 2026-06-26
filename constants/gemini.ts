@@ -1,7 +1,7 @@
 export const GEMINI_MODELS = [
-  'gemini-2.0-flash',
+  'gemini-2.5-flash',
+  'gemini-2.5-flash-lite',
   'gemini-flash-latest',
-  'gemini-1.5-flash',
 ] as const;
 
 export function geminiApiUrl(model: string): string {
@@ -10,17 +10,22 @@ export function geminiApiUrl(model: string): string {
 
 const RAW_GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY ?? '';
 
-/** Prepend AIzaSy when key was stored without prefix (common copy-paste mistake). */
 export function normalizeGeminiApiKey(raw: string): string {
-  const trimmed = raw.trim();
-  if (!trimmed) return '';
-  if (trimmed.startsWith('AQ.')) {
-    return `AIzaSy${trimmed}`;
-  }
-  return trimmed;
+  return raw.trim();
 }
 
-export const GEMINI_API_KEY = normalizeGeminiApiKey(RAW_GEMINI_API_KEY);
+function isWorkingGeminiKey(key: string): boolean {
+  return key.startsWith('AIzaSy') && key.length >= 35;
+}
+
+/** Endast AIzaSy-nycklar — AQ från AI Studio fungerar inte i mobilappen. */
+export function getGeminiApiKeyCandidates(): string[] {
+  const fromEnv = normalizeGeminiApiKey(RAW_GEMINI_API_KEY);
+  if (isWorkingGeminiKey(fromEnv)) return [fromEnv];
+  return [];
+}
+
+export const GEMINI_API_KEY = getGeminiApiKeyCandidates()[0] ?? '';
 
 export type GeminiKeyValidation = {
   valid: boolean;
@@ -32,21 +37,22 @@ export function validateGeminiApiKey(key: string = GEMINI_API_KEY): GeminiKeyVal
     return {
       valid: false,
       error:
-        'Gemini API-nyckel saknas. Lägg till EXPO_PUBLIC_GEMINI_API_KEY i .env eller EAS och bygg om appen.',
+        'Gemini API-nyckel saknas. Skapa AIzaSy-nyckel i Google Cloud Console och bygg om appen.',
     };
   }
-  if (!key.startsWith('AIzaSy')) {
+  if (key.startsWith('AQ.')) {
     return {
       valid: false,
       error:
-        'Ogiltig Gemini API-nyckel. Nyckeln ska börja med AIzaSy. Kopiera hela nyckeln från Google AI Studio.',
+        'AQ-nycklar från AI Studio fungerar inte. Skapa AIzaSy-nyckel i Google Cloud Console → Credentials.',
     };
   }
-  if (key.length < 35) {
-    return {
-      valid: false,
-      error: 'Ogiltig Gemini API-nyckel. Nyckeln verkar vara ofullständig.',
-    };
+  if (isWorkingGeminiKey(key)) {
+    return { valid: true };
   }
-  return { valid: true };
+  return {
+    valid: false,
+    error:
+      "Ogiltig Gemini API-nyckel. Använd AIzaSy-nyckel från Google Cloud Console (Don't restrict key).",
+  };
 }

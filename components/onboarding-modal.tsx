@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -12,6 +12,8 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+
+import { useLocale } from '@/contexts/locale-context';
 
 const COLORS = {
   background: '#0D0D0D',
@@ -26,12 +28,25 @@ const COLORS = {
 type OnboardingModalProps = {
   visible: boolean;
   isSubmitting: boolean;
+  initialName?: string;
   onComplete: (name: string, job: string) => void;
 };
 
-export function OnboardingModal({ visible, isSubmitting, onComplete }: OnboardingModalProps) {
-  const [name, setName] = useState('');
+export function OnboardingModal({
+  visible,
+  isSubmitting,
+  initialName = '',
+  onComplete,
+}: OnboardingModalProps) {
+  const { strings } = useLocale();
+  const [name, setName] = useState(initialName);
   const [job, setJob] = useState('');
+
+  useEffect(() => {
+    if (visible && initialName && !name.trim()) {
+      setName(initialName);
+    }
+  }, [visible, initialName, name]);
 
   const canSubmit = name.trim().length > 0 && job.trim().length > 0 && !isSubmitting;
 
@@ -46,15 +61,13 @@ export function OnboardingModal({ visible, isSubmitting, onComplete }: Onboardin
             <View style={styles.iconWrap}>
               <Ionicons name="sparkles" size={28} color={COLORS.purple} />
             </View>
-            <Text style={styles.title}>Välkommen till My Assistant</Text>
-            <Text style={styles.subtitle}>
-              Jag blir mer personlig ju mer vi pratar. Berätta lite om dig först.
-            </Text>
+            <Text style={styles.title}>{strings.onboarding.title}</Text>
+            <Text style={styles.subtitle}>{strings.onboarding.subtitle}</Text>
 
-            <Text style={styles.label}>Vad heter du?</Text>
+            <Text style={styles.label}>{strings.onboarding.nameLabel}</Text>
             <TextInput
               style={styles.input}
-              placeholder="Ditt namn"
+              placeholder={strings.onboarding.namePlaceholder}
               placeholderTextColor={COLORS.textMuted}
               value={name}
               onChangeText={setName}
@@ -65,10 +78,10 @@ export function OnboardingModal({ visible, isSubmitting, onComplete }: Onboardin
               keyboardAppearance="dark"
             />
 
-            <Text style={styles.label}>Vad jobbar du med?</Text>
+            <Text style={styles.label}>{strings.onboarding.jobLabel}</Text>
             <TextInput
               style={styles.input}
-              placeholder="Till exempel: projektledare, utvecklare..."
+              placeholder={strings.onboarding.jobPlaceholder}
               placeholderTextColor={COLORS.textMuted}
               value={job}
               onChangeText={setJob}
@@ -86,7 +99,7 @@ export function OnboardingModal({ visible, isSubmitting, onComplete }: Onboardin
               {isSubmitting ? (
                 <ActivityIndicator color={COLORS.text} />
               ) : (
-                <Text style={styles.buttonText}>Kom igång</Text>
+                <Text style={styles.buttonText}>{strings.onboarding.start}</Text>
               )}
             </Pressable>
           </View>

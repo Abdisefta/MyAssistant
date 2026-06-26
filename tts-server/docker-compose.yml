@@ -1,0 +1,19 @@
+services:
+  alma-tts:
+    build: .
+    container_name: myassistant-alma-tts
+    ports:
+      - "${TTS_PORT:-3001}:3001"
+    environment:
+      PORT: 3001
+      PIPER_BIN: /opt/piper/piper
+      PIPER_MODEL: /voices/sv_SE-alma-medium.onnx
+      LD_LIBRARY_PATH: /opt/piper
+      MAX_TEXT_LENGTH: 2000
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s

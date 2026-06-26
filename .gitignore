@@ -42,3 +42,10 @@ app-example
 # generated native folders
 /ios
 /android
+
+# build logs
+build-*.log
+build-apk*.log
+build-release*.log
+build-debug*.log
+build-v*.log

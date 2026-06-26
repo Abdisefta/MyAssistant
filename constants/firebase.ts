@@ -1,3 +1,4 @@
+/** Firebase client config — set via EXPO_PUBLIC_* in .env at build time. */
 export const FIREBASE_CONFIG = {
   apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY ?? '',
   authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN ?? '',

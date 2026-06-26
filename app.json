@@ -2,7 +2,7 @@
   "expo": {
     "name": "My Assistant",
     "slug": "MyAssistantFinal",
-    "version": "1.0.3",
+    "version": "1.7.5",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "myassistantfinal",
@@ -14,6 +14,15 @@
     },
     "android": {
       "package": "com.abdisefta.myassistantfinal",
+      "permissions": [
+        "READ_CALENDAR",
+        "WRITE_CALENDAR",
+        "POST_NOTIFICATIONS",
+        "RECEIVE_BOOT_COMPLETED",
+        "VIBRATE",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION"
+      ],
       "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
@@ -22,7 +31,8 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "edgeToEdgeEnabled": false,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "usesCleartextTraffic": true
     },
     "web": {
       "output": "static",
@@ -46,7 +56,8 @@
       [
         "expo-calendar",
         {
-          "calendarPermission": "My Assistant behöver läsa din kalender för att visa möten från Google, Apple och andra kalendrar."
+          "calendarPermission": "My Assistant behöver läsa din kalender för att visa möten.",
+          "calendarWritePermission": "My Assistant behöver skriva i kalendern för att boka möten åt dig."
         }
       ],
       [
@@ -66,7 +77,28 @@
           "androidSpeechServicePackages": ["com.google.android.googlequicksearchbox"]
         }
       ],
-      "expo-notifications"
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/icon.png",
+          "color": "#8B7CF7",
+          "sounds": []
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "My Assistant använder din plats för att visa rätt väder där du befinner dig.",
+          "locationWhenInUsePermission": "My Assistant använder din plats för att visa rätt väder där du befinner dig."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "My Assistant behöver tillgång till dina bilder för profilbilden på Hem."
+        }
+      ],
+      "./plugins/with-android-cleartext.js"
     ],
     "experiments": {
       "typedRoutes": true,

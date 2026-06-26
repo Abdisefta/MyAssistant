@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Keyboard, Platform, type KeyboardEvent } from 'react-native';
+import { Keyboard, Platform, type KeyboardEvent, type KeyboardEventName } from 'react-native';
 
 type KeyboardState = {
   visible: boolean;
@@ -21,11 +21,11 @@ export function useKeyboardState(): KeyboardState {
       setState({ visible: false, height: 0 });
     };
 
-    const showEvents =
+    const showEvents: KeyboardEventName[] =
       Platform.OS === 'ios'
         ? ['keyboardWillShow', 'keyboardDidShow']
         : ['keyboardDidShow'];
-    const hideEvents =
+    const hideEvents: KeyboardEventName[] =
       Platform.OS === 'ios'
         ? ['keyboardWillHide', 'keyboardDidHide']
         : ['keyboardDidHide'];

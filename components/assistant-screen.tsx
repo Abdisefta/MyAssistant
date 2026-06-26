@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
 import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -17,9 +18,16 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { MorningBriefing } from '@/components/morning-briefing';
 import { APP_COLORS as COLORS } from '@/constants/app-theme';
+import { useLocale } from '@/contexts/locale-context';
 import type { TranscriptEntry } from '@/hooks/use-assistant';
+
+const QUICK_PHRASES: { label: string; phrase: string }[] = [
+  { label: 'Möten idag?', phrase: 'Vad har jag för möten idag?' },
+  { label: 'Boka imorgon', phrase: 'Boka möte imorgon kl 10' },
+  { label: 'Påminnelse', phrase: 'Påminn mig att handla mat' },
+  { label: 'Ta bort möte', phrase: 'Ta bort senaste mötet' },
+];
 
 type Props = {
   memoryName?: string;
@@ -28,20 +36,20 @@ type Props = {
   isThinking: boolean;
   inputText: string;
   isListening: boolean;
-  googleAccessToken?: string;
   onInputChange: (text: string) => void;
   onSend: () => void;
-  onMicPressIn: () => void;
-  onMicPressOut: () => void;
-  onOpenEmail?: () => void;
+  onMicPress: () => void;
+  onQuickPhrase: (phrase: string) => void;
   onComposeOpenChange?: (open: boolean) => void;
 };
 
 function TranscriptBubble({ entry }: { entry: TranscriptEntry }) {
+  const { strings } = useLocale();
+
   if (entry.role === 'system') {
     return (
       <View style={styles.systemRow}>
-        {entry.text === 'Tänker...' ? (
+        {entry.id === 'thinking' ? (
           <ActivityIndicator size="small" color={COLORS.purple} />
         ) : (
           <View style={styles.systemDot} />
@@ -62,7 +70,9 @@ function TranscriptBubble({ entry }: { entry: TranscriptEntry }) {
         </View>
       )}
       <View style={[styles.bubble, isUser ? styles.bubbleUser : styles.bubbleAssistant]}>
-        <Text style={styles.bubbleLabel}>{isUser ? 'Du' : 'Assistent'}</Text>
+        <Text style={styles.bubbleLabel}>
+          {isUser ? strings.common.you : strings.common.assistant}
+        </Text>
         <Text style={styles.bubbleText}>{entry.text}</Text>
       </View>
     </View>
@@ -86,6 +96,7 @@ function ComposeModal({
   onClose: () => void;
   onSend: () => void;
 }) {
+  const { strings } = useLocale();
   const scrollRef = useRef<ScrollView>(null);
 
   useEffect(() => {
@@ -109,7 +120,7 @@ function ComposeModal({
         <SafeAreaView edges={['top', 'bottom']} style={styles.composeSafe}>
           <View style={styles.composeCard}>
             <View style={styles.composeHeader}>
-              <Text style={styles.composeTitle}>Skriv till assistenten</Text>
+              <Text style={styles.composeTitle}>{strings.assistant.writePlaceholder}</Text>
               <Pressable onPress={onClose} hitSlop={12} disabled={isThinking}>
                 <Ionicons name="close" size={24} color={COLORS.textMuted} />
               </Pressable>
@@ -129,7 +140,7 @@ function ComposeModal({
 
             {inputText.trim().length > 0 && (
               <View style={styles.livePreview}>
-                <Text style={styles.livePreviewLabel}>Du skriver</Text>
+                <Text style={styles.livePreviewLabel}>{strings.common.you}</Text>
                 <Text style={styles.livePreviewText}>{inputText}</Text>
               </View>
             )}
@@ -138,7 +149,7 @@ function ComposeModal({
               style={styles.composeInput}
               value={inputText}
               onChangeText={onChangeText}
-              placeholder="Skriv här..."
+              placeholder={strings.assistant.writePlaceholder}
               placeholderTextColor={COLORS.textMuted}
               multiline
               textAlignVertical="top"
@@ -181,14 +192,13 @@ export function AssistantScreen({
   isThinking,
   inputText,
   isListening,
-  googleAccessToken,
   onInputChange,
   onSend,
-  onMicPressIn,
-  onMicPressOut,
-  onOpenEmail,
+  onMicPress,
+  onQuickPhrase,
   onComposeOpenChange,
 }: Props) {
+  const { strings } = useLocale();
   const pulseOuter = useRef(new Animated.Value(1)).current;
   const pulseInner = useRef(new Animated.Value(1)).current;
   const glowOpacity = useRef(new Animated.Value(0.35)).current;
@@ -265,14 +275,8 @@ export function AssistantScreen({
         My Assistant{memoryName ? ` · ${memoryName}` : ''}
       </Text>
       <Text style={styles.headerSubtitle}>
-        {memoryJob ? `${memoryJob} · Gemini Flash` : 'Gemini Flash'}
+        {memoryJob ? `${memoryJob} · ${strings.assistant.modelLabel}` : strings.assistant.modelLabel}
       </Text>
-
-      <MorningBriefing
-        accessToken={googleAccessToken}
-        userName={memoryName}
-        onOpenEmail={onOpenEmail}
-      />
 
       <View style={styles.orbSection}>
         <View style={styles.orbContainer}>
@@ -305,7 +309,7 @@ export function AssistantScreen({
           ref={scrollRef}
           style={styles.transcriptScroll}
           contentContainerStyle={styles.transcriptScrollContent}
-          showsVerticalScrollIndicator={false}
+          showsVerticalScrollIndicator
         >
           {transcript.map((entry) => (
             <TranscriptBubble key={entry.id} entry={entry} />
@@ -314,32 +318,61 @@ export function AssistantScreen({
       </View>
 
       <Pressable style={styles.inputTrigger} onPress={openCompose}>
-        <Text
-          style={[styles.inputTriggerText, inputText.trim() && styles.inputTriggerTextFilled]}
-          numberOfLines={2}
-        >
-          {inputText.trim() || 'Skriv till assistenten...'}
-        </Text>
+        <View style={styles.inputTriggerBody}>
+          <Text style={styles.inputTriggerLabel}>Skriv till assistenten</Text>
+          <Text
+            style={[styles.inputTriggerText, inputText.trim() && styles.inputTriggerTextFilled]}
+            numberOfLines={3}
+          >
+            {inputText.trim() || strings.assistant.writePlaceholder}
+          </Text>
+        </View>
         <View style={styles.inputTriggerIcon}>
-          <Ionicons name="create-outline" size={20} color={COLORS.purple} />
+          <Ionicons name="create-outline" size={22} color={COLORS.purple} />
         </View>
       </Pressable>
+
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.quickPhrasesRow}
+        keyboardShouldPersistTaps="handled"
+      >
+        {QUICK_PHRASES.map(({ label, phrase }) => (
+          <Pressable
+            key={phrase}
+            style={[styles.quickPhraseChip, isThinking && styles.quickPhraseDisabled]}
+            onPress={() => {
+              if (isThinking) return;
+              void Haptics.selectionAsync();
+              onQuickPhrase(phrase);
+            }}
+            disabled={isThinking}
+          >
+            <Text style={styles.quickPhraseText} numberOfLines={1}>
+              {label}
+            </Text>
+          </Pressable>
+        ))}
+      </ScrollView>
 
       <View style={styles.micSection}>
         <Text style={styles.micHint}>
           {isListening
-            ? 'Släpp för att skicka'
+            ? strings.assistant.micListening
             : isThinking
-              ? 'Gemini tänker...'
-              : 'Håll inne mikrofonen eller tryck ovan för att skriva'}
+              ? strings.assistant.micThinking
+              : strings.assistant.micHint}
         </Text>
         <Pressable
-          onPressIn={onMicPressIn}
-          onPressOut={onMicPressOut}
+          onPress={() => {
+            void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            onMicPress();
+          }}
           disabled={isThinking}
           style={({ pressed }) => [
             styles.micButton,
-            (isListening || isThinking) && styles.micButtonActive,
+            isListening && styles.micButtonActive,
             pressed && !isListening && styles.micButtonPressed,
             isThinking && styles.micButtonDisabled,
           ]}
@@ -376,15 +409,16 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: COLORS.purple,
     marginTop: 2,
-    marginBottom: 8,
+    marginBottom: 4,
   },
   orbSection: {
     alignItems: 'center',
-    paddingVertical: 6,
+    paddingVertical: 0,
+    marginBottom: 2,
   },
   orbContainer: {
-    width: 150,
-    height: 150,
+    width: 72,
+    height: 72,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -393,31 +427,31 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   orbRingOuter: {
-    width: 140,
-    height: 140,
+    width: 66,
+    height: 66,
     backgroundColor: COLORS.purpleMuted,
     borderWidth: 1,
     borderColor: 'rgba(139, 124, 247, 0.2)',
   },
   orbRingInner: {
-    width: 108,
-    height: 108,
+    width: 52,
+    height: 52,
     backgroundColor: 'rgba(139, 124, 247, 0.22)',
     borderWidth: 1,
     borderColor: 'rgba(167, 139, 250, 0.3)',
   },
   orbCore: {
-    width: 76,
-    height: 76,
-    borderRadius: 38,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     backgroundColor: COLORS.purpleDark,
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: COLORS.purpleGlow,
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.7,
-    shadowRadius: 20,
-    elevation: 10,
+    shadowRadius: 14,
+    elevation: 8,
   },
   orbCoreActive: {
     shadowOpacity: 1,
@@ -425,18 +459,19 @@ const styles = StyleSheet.create({
     transform: [{ scale: 1.05 }],
   },
   orbInner: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
     backgroundColor: COLORS.purple,
   },
   transcriptContainer: {
     flex: 1,
+    minHeight: 240,
     backgroundColor: COLORS.surface,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: COLORS.border,
-    marginBottom: 10,
+    marginBottom: 8,
     overflow: 'hidden',
   },
   transcriptHeader: {
@@ -528,39 +563,76 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: COLORS.text,
     lineHeight: 20,
+    flexShrink: 1,
   },
   inputTrigger: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
+    alignItems: 'flex-start',
+    gap: 12,
     backgroundColor: COLORS.surfaceElevated,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
+    borderWidth: 1.5,
+    borderColor: 'rgba(139, 124, 247, 0.45)',
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
     marginBottom: 8,
+    minHeight: 56,
+  },
+  inputTriggerBody: {
+    flex: 1,
+    gap: 4,
+  },
+  inputTriggerLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.purple,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   inputTriggerText: {
-    flex: 1,
-    fontSize: 15,
+    fontSize: 16,
+    lineHeight: 22,
     color: COLORS.textMuted,
   },
   inputTriggerTextFilled: {
     color: '#FFFFFF',
   },
   inputTriggerIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
+    width: 40,
+    height: 40,
+    borderRadius: 12,
     backgroundColor: COLORS.purpleMuted,
     alignItems: 'center',
     justifyContent: 'center',
+    marginTop: 2,
+  },
+  quickPhrasesRow: {
+    gap: 8,
+    paddingTop: 6,
+    paddingBottom: 4,
+    alignItems: 'center',
+  },
+  quickPhraseChip: {
+    maxWidth: 130,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 16,
+    backgroundColor: COLORS.purpleMuted,
+    borderWidth: 1,
+    borderColor: 'rgba(139, 124, 247, 0.35)',
+  },
+  quickPhraseDisabled: {
+    opacity: 0.5,
+  },
+  quickPhraseText: {
+    fontSize: 12,
+    color: COLORS.purple,
+    fontWeight: '600',
   },
   micSection: {
     alignItems: 'center',
-    paddingBottom: 4,
-    gap: 8,
+    paddingBottom: 2,
+    gap: 6,
   },
   micHint: {
     fontSize: 12,

@@ -9,13 +9,14 @@ import {
 
 const AUTH_CACHE_KEY = '@my_assistant_auth_user';
 
-export function useAppAuth() {
+export function useAppAuth(options?: { enabled?: boolean }) {
+  const enabled = options?.enabled ?? true;
   const [user, setUser] = useState<AppUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const configured = isFirebaseConfigured();
 
   useEffect(() => {
-    if (!configured) {
+    if (!enabled || !configured) {
       setIsLoading(false);
       return;
     }
@@ -46,7 +47,7 @@ export function useAppAuth() {
       active = false;
       unsubscribe();
     };
-  }, [configured]);
+  }, [configured, enabled]);
 
   return {
     user,

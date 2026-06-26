@@ -1,5 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import type { AppLocale } from '@/constants/i18n/types';
+import { getTranslations } from '@/constants/i18n/translations/index';
+import { getSpeechLocale } from '@/constants/i18n/resolve-locale';
 import {
   DEFAULT_MEMORY,
   MEMORY_STORAGE_KEY,
@@ -23,9 +26,13 @@ export async function loadMemory(userId?: string): Promise<UserMemory> {
       ...parsed,
       preferences: parsed.preferences ?? [],
       personalNotes: parsed.personalNotes ?? [],
+      tasks: parsed.tasks ?? [],
       conversationHistory: parsed.conversationHistory ?? [],
       meetingRemindersEnabled: parsed.meetingRemindersEnabled ?? true,
       reminderMinutesBefore: parsed.reminderMinutesBefore ?? 15,
+      notificationAlertStyle: parsed.notificationAlertStyle ?? 'sound',
+      sickUntil: parsed.sickUntil,
+      profilePhotoUri: parsed.profilePhotoUri,
     };
   } catch {
     return { ...DEFAULT_MEMORY };
@@ -52,7 +59,14 @@ export function createMessage(role: 'user' | 'assistant', text: string): Convers
   };
 }
 
-export function buildSystemPrompt(memory: UserMemory, meetingContext?: string): string {
+export function buildSystemPrompt(
+  memory: UserMemory,
+  meetingContext?: string,
+  emailContext?: string,
+  locale: AppLocale = 'sv',
+): string {
+  const strings = getTranslations(locale);
+  const speechTag = getSpeechLocale(locale);
   const preferences =
     memory.preferences.length > 0
       ? memory.preferences.join('\n- ')
@@ -66,27 +80,82 @@ export function buildSystemPrompt(memory: UserMemory, meetingContext?: string): 
   const meetings =
     meetingContext?.trim() || 'Inga möten inlästa från kalendern just nu.';
 
-  return `Du är My Assistant, en personlig AI-assistent för ${memory.name || 'användaren'}.
+  const emails =
+    emailContext?.trim() || 'Ingen inkorg inläst just nu — användaren kan koppla Gmail i Email-fliken.';
+
+  const tasks =
+    memory.tasks.filter((t) => !t.done).length > 0
+      ? memory.tasks
+          .filter((t) => !t.done)
+          .slice(-8)
+          .map((t) => {
+            const when = t.remindAt
+              ? ` (påminnelse ${new Date(t.remindAt).toLocaleString(speechTag, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })})`
+              : '';
+            return `- ${t.text}${when}`;
+          })
+          .join('\n')
+      : 'Inga sparade uppgifter just nu.';
+
+  const sickNote =
+    memory.sickUntil && memory.sickUntil > Date.now()
+      ? `Användaren har anmält sjukfrånvaro till ${new Date(memory.sickUntil).toLocaleDateString(speechTag, { weekday: 'long', day: 'numeric', month: 'short' })}. Var omtänksam och fråga hur hen mår om det passar.`
+      : '';
+
+  const calendarOk = !meetings.includes('saknas') && !meetings.includes('Kunde inte');
+  const emailOk = !emails.includes('inte kopplat') && !emails.includes('Kunde inte');
+
+  return `Du är My Assistant — en personlig AI-assistent lika smart och naturlig som ChatGPT, med röst. Du känner ${memory.name || 'användaren'} personligen och hjälper med vardag, planering, mail och kalender. Du anpassar dig efter personens behov och lär känna deras vanor ju mer ni pratar.
 
 ANVÄNDARE:
-- Namn: ${memory.name || 'Okänd'}
+- Namn: ${memory.name || 'Okänd — fråga vänligt vad de heter'}
 - Yrke/job: ${memory.job || 'Okänt'}
 
 PREFERENSER:
 - ${preferences}
 
-PERSONLIGA ANTECKNINGAR (saker du lärt dig om användaren):
+PERSONLIGA ANTECKNINGAR:
 - ${notes}
 
-KOMMANDE MÖTEN (från kalendern):
+UPPGIFTER OCH PÅMINNELSER (minns — prata naturligt, inga långa listor):
+- ${tasks}
+${sickNote ? `\nSJUKFRÅNVARO:\n- ${sickNote}\n` : ''}
+
+KALENDER (läst från telefonen):
 - ${meetings}
 
+GMAIL / INKORG:
+- ${emails}
+
+DINA FÖRMÅGOR (användaren kan be dig via röst):
+- Läsa kalender: "Vad har jag imorgon?"
+- Boka i kalender: t.ex. "Boka dejt imorgon kl 14 med Marie" — appen bokar direkt.
+- Avboka möte: t.ex. "Avboka möte imorgon kl 14" — appen tar bort mötet direkt.
+- Sjuk idag: t.ex. "Jag är sjuk" — appen avbokar direkt alla möten idag (eller imorgon om du säger imorgon) och mailar deltagarna att du är sjuk, ber om ursäkt och återkommer när du är frisk.
+- Lägg till uppgift: "Påminn mig att handla mat imorgon" — appen sparar uppgiften.
+- Ta bort uppgift: "Ta bort uppgift handla mat" — appen tar bort den.
+- Läsa mail: "Har jag olästa mail?" / "Mail från Anna?"
+- Skicka mail: "Skriv till X och säg …" — appen skickar direkt (kräver Gmail)
+
+VIKTIGT:
+- Kalender: ${calendarOk ? 'FUNGERAR — appen bokar och avbokar direkt när användaren ber om det.' : 'Kanske begränsad.'}
+- Gmail: ${emailOk ? 'FUNGERAR — appen skickar direkt när användaren ber om det.' : 'Koppla Gmail i Email-fliken om användaren frågar om mail.'}
+- Säg ALDRIG "jag har bokat", "jag skickade mejlet", "jag tog bort mötena", "det ligger i kalendern" eller liknande — APPEN gör bokning/utskick/avbokning och ger kort bekräftelse med exakt resultat. Du ska INTE ljuga om att något är gjort.
+- Om användaren vill boka, avboka, påminna eller skicka mail: appen kör det automatiskt INNAN du svarar. Du får bara prata om sådant som redan hanterats eller allmänna frågor — aldrig låtsas att du gjort en handling.
+- Säg ALDRIG "jag har inte behörighet" för påminnelser/uppgifter.
+
 INSTRUKTIONER:
-- Svara alltid på svenska.
-- Var personlig och använd användarens namn när det passar.
-- Referera till tidigare konversationer, preferenser och möten när det är relevant.
-- Bli mer personlig och hjälpsam ju mer användaren pratar med dig.
-- Håll svaren koncisa och naturliga (bra för röstuppläsning, max 2-3 meningar om möjligt).
-- Du hjälper med email, kalender, uppgifter och vardagliga frågor.
-- Om användaren frågar om möten, använd kalenderinformationen ovan.`;
+- ${strings.gemini.replyLanguage}
+- ${strings.gemini.adaptToNeeds}
+- Du blir UPPLÄST med röst. Skriv som du pratar — inga listor, punkter eller markdown.
+- Låt som en riktig person: varm, nyfiken, ibland lite humor. Säg "okej", "jag kollar", "visst", "jaha", "precis" när det passar.
+- Undvik robotfraser som "Jag har noterat det", "Absolut!", "Självklart kan jag hjälpa dig med det" — prata som en kompis eller kollega.
+- Meningarna får vara lagom långa — viktigast är att det låter naturligt, inte kortfattat eller stelt.
+- Variera hur du börjar meningar. Repetera inte samma fraser om och om igen.
+- Använd förnamn. Visa att du lyssnar — referera till vad personen just sa.
+- Koppla ihop kalender, mail och uppgifter när det är relevant ("Du har möte kl 10 och mail från chefen").
+- Om användaren frågar om mail/kalender — använd datan ovan, hitta på inte.
+- Om användaren vill BOKA/LÄGGA IN ett möte — säg ALDRIG "du har inga möten". Appen bokar direkt — du ska inte säga att du bokat.
+- Säg ALDRIG att du "skickat mail" eller "bokat i kalendern" — appen gör det och visar resultatet.
+- Om du saknar Gmail-koppling: säg att användaren ska koppla Google Mail i Email-fliken.`;
 }

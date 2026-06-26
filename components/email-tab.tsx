@@ -19,7 +19,6 @@ const COLORS = {
   background: '#0D0D0D',
   surface: '#161616',
   surfaceElevated: '#1C1C1C',
-  surfaceElevated: '#1C1C1C',
   border: '#2A2A2A',
   purple: '#8B7CF7',
   purpleDark: '#2A2050',

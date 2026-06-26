@@ -2,22 +2,31 @@ import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Platform,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
 
+import { BookEventModal } from '@/components/book-event-modal';
 import { APP_COLORS as COLORS } from '@/constants/app-theme';
+import { getSpeechLocale } from '@/constants/i18n/resolve-locale';
+import { useLocale } from '@/contexts/locale-context';
+import { migrateLegacyCalendarEvents } from '@/services/local-calendar-store';
 import {
   type CalendarAccessState,
   type CalendarEventItem,
+  cancelAllEventsForDay,
+  deleteCalendarEventCompletely,
   fetchEventsForDay,
   formatDayLabel,
   formatEventTime,
   getCalendarAccessState,
+  getEmptyDayMessage,
   getNativeRebuildCommand,
   getPlatformCalendarHint,
   listConnectedCalendars,
@@ -39,7 +48,9 @@ function isSameDay(a: Date, b: Date): boolean {
   );
 }
 
-export function CalendarTab() {
+export function CalendarTab({ userId }: { userId: string }) {
+  const { locale, strings, t } = useLocale();
+  const speechTag = getSpeechLocale(locale);
   const [selectedDate, setSelectedDate] = useState(() => new Date());
   const [access, setAccess] = useState<CalendarAccessState>('undetermined');
   const [events, setEvents] = useState<CalendarEventItem[]>([]);
@@ -47,36 +58,47 @@ export function CalendarTab() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [bookModalVisible, setBookModalVisible] = useState(false);
+  const [bookSuccess, setBookSuccess] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const loadEvents = useCallback(async (date: Date) => {
-    setIsLoading(true);
+  const loadEvents = useCallback(async (date: Date, silent = false) => {
+    if (!silent) {
+      setIsLoading(true);
+    }
     setError(null);
     try {
       const state = await getCalendarAccessState();
       setAccess(state);
 
-      if (state !== 'granted') {
-        setEvents([]);
-        setCalendarNames([]);
-        return;
-      }
-
       const calendars = await listConnectedCalendars();
       setCalendarNames(calendars.map((c) => c.title));
 
-      const dayEvents = await fetchEventsForDay(date);
+      const dayEvents = await fetchEventsForDay(date, userId);
       setEvents(dayEvents);
     } catch {
-      setError('Kunde inte läsa kalendern. Försök igen.');
+      setError(strings.calendar.loadError);
       setEvents([]);
     } finally {
-      setIsLoading(false);
+      if (!silent) {
+        setIsLoading(false);
+      }
     }
-  }, []);
+  }, [userId, strings.calendar.loadError]);
+
+  useEffect(() => {
+    void migrateLegacyCalendarEvents(userId);
+  }, [userId]);
 
   useEffect(() => {
     loadEvents(selectedDate);
   }, [selectedDate, loadEvents]);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await loadEvents(selectedDate);
+    setRefreshing(false);
+  };
 
   const handleRequestAccess = async () => {
     const granted = await requestCalendarAccess();
@@ -87,6 +109,65 @@ export function CalendarTab() {
   };
 
   const goToday = () => setSelectedDate(new Date());
+
+  const handleBooked = () => {
+    setBookSuccess(
+      t('calendar.bookedSuccess', { day: formatDayLabel(selectedDate).toLowerCase() }),
+    );
+    void loadEvents(selectedDate, true);
+    setTimeout(() => setBookSuccess(null), 5000);
+  };
+
+  const confirmDeleteEvent = (event: CalendarEventItem) => {
+    Alert.alert(
+      'Ta bort möte',
+      `Vill du ta bort "${event.title}" (${formatEventTime(event)})?`,
+      [
+        { text: 'Avbryt', style: 'cancel' },
+        {
+          text: 'Ta bort',
+          style: 'destructive',
+          onPress: async () => {
+            const { ok, remaining } = await deleteCalendarEventCompletely(event, userId);
+            setExpandedId(null);
+            await loadEvents(selectedDate, true);
+            if (!ok && remaining > 0) {
+              Alert.alert(
+                'Delvis borttaget',
+                `${remaining} kopia${remaining > 1 ? 'or' : ''} finns kvar. Försök trycka Ta bort igen.`,
+              );
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const confirmDeleteAllEvents = () => {
+    const dayLabel = formatDayLabel(selectedDate).toLowerCase();
+    Alert.alert(
+      'Ta bort alla möten',
+      `Vill du ta bort alla ${events.length} möten ${dayLabel}?`,
+      [
+        { text: 'Avbryt', style: 'cancel' },
+        {
+          text: 'Ta bort alla',
+          style: 'destructive',
+          onPress: async () => {
+            const { remaining } = await cancelAllEventsForDay(selectedDate, userId);
+            setExpandedId(null);
+            await loadEvents(selectedDate, true);
+            if (remaining > 0) {
+              Alert.alert(
+                'Delvis borttaget',
+                `${remaining} möte${remaining > 1 ? 'n' : ''} finns kvar. Tryck Ta bort igen på de som syns.`,
+              );
+            }
+          },
+        },
+      ],
+    );
+  };
 
   if (access === 'unavailable' && !isLoading) {
     return (
@@ -131,38 +212,59 @@ export function CalendarTab() {
   if (access !== 'granted' && !isLoading) {
     return (
       <View style={styles.container}>
-        <View style={styles.header}>
-          <Text style={styles.title}>Kalender</Text>
-          <Text style={styles.sub}>{getPlatformCalendarHint()}</Text>
-        </View>
-
-        <View style={styles.permissionCard}>
-          <View style={styles.permissionIcon}>
-            <Ionicons name="calendar-outline" size={32} color={COLORS.purple} />
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={COLORS.purple} />
+          }
+        >
+          <View style={styles.header}>
+            <Text style={styles.title}>{strings.tabs.calendar}</Text>
+            <Text style={styles.sub}>{getPlatformCalendarHint()}</Text>
           </View>
-          <Text style={styles.permissionTitle}>Kalenderbehörighet behövs</Text>
-          <Text style={styles.permissionText}>
-            För att visa dina möten behöver appen läsa kalendern på telefonen. Det fungerar med
-            Google Kalender, Apple Kalender, Outlook och andra kalendrar du har kopplat.
-          </Text>
 
-          {access === 'denied' ? (
-            <Text style={styles.permissionDenied}>
-              Behörighet nekad. Gå till telefonens inställningar och tillåt kalender för My
-              Assistant.
-            </Text>
-          ) : null}
+          <View style={styles.permissionCard}>
+            <View style={styles.permissionIcon}>
+              <Ionicons name="calendar-outline" size={32} color={COLORS.purple} />
+            </View>
+            <Text style={styles.permissionTitle}>{strings.calendar.permissionTitle}</Text>
+            <Text style={styles.permissionText}>{strings.calendar.permissionText}</Text>
 
-          <Pressable style={styles.primaryButton} onPress={handleRequestAccess}>
-            <Text style={styles.primaryButtonText}>Tillåt kalender</Text>
-          </Pressable>
-
-          {access === 'denied' ? (
-            <Pressable style={styles.secondaryButton} onPress={openAppSettings}>
-              <Text style={styles.secondaryButtonText}>Öppna inställningar</Text>
+            <Pressable style={styles.primaryButton} onPress={handleRequestAccess}>
+              <Text style={styles.primaryButtonText}>{strings.calendar.allowAccess}</Text>
             </Pressable>
+
+            {access === 'denied' ? (
+              <Pressable style={styles.secondaryButton} onPress={openAppSettings}>
+                <Text style={styles.secondaryButtonText}>{strings.calendar.openSettings}</Text>
+              </Pressable>
+            ) : null}
+
+            <Pressable style={styles.primaryButton} onPress={() => setBookModalVisible(true)}>
+              <Text style={styles.primaryButtonText}>+ {strings.tabs.calendar}</Text>
+            </Pressable>
+          </View>
+
+          {events.length > 0 ? (
+            <View style={styles.eventsSection}>
+              <Text style={styles.sectionLabel}>{strings.tabs.calendar}</Text>
+              {events.map((event) => (
+                <View key={event.id} style={styles.eventCard}>
+                  <Text style={styles.eventTitle}>{event.title}</Text>
+                  <Text style={styles.eventMeta}>{formatEventTime(event)}</Text>
+                </View>
+              ))}
+            </View>
           ) : null}
-        </View>
+        </ScrollView>
+
+        <BookEventModal
+          visible={bookModalVisible}
+          selectedDate={selectedDate}
+          userId={userId}
+          onClose={() => setBookModalVisible(false)}
+          onBooked={handleBooked}
+        />
       </View>
     );
   }
@@ -170,11 +272,42 @@ export function CalendarTab() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Kalender</Text>
-        <Text style={styles.sub}>{formatDayLabel(selectedDate)}</Text>
+        <View style={styles.headerRow}>
+          <View>
+            <Text style={styles.title}>{strings.tabs.calendar}</Text>
+            <Text style={styles.sub}>{formatDayLabel(selectedDate)}</Text>
+          </View>
+          <View style={styles.headerActions}>
+            {events.length > 0 ? (
+              <Pressable style={styles.deleteAllButton} onPress={confirmDeleteAllEvents}>
+                <Ionicons name="trash-outline" size={16} color="#FF8A8A" />
+                <Text style={styles.deleteAllButtonText}>Ta bort alla</Text>
+              </Pressable>
+            ) : null}
+            <Pressable style={styles.bookButton} onPress={() => setBookModalVisible(true)}>
+              <Ionicons name="add" size={18} color={COLORS.text} />
+              <Text style={styles.bookButtonText}>Lägg till</Text>
+            </Pressable>
+          </View>
+        </View>
+        {bookSuccess ? <Text style={styles.successBanner}>{bookSuccess}</Text> : null}
       </View>
 
       <View style={styles.dayNav}>
+        <Pressable style={styles.quickDayChip} onPress={goToday}>
+          <Text style={styles.quickDayText}>{strings.calendar.today}</Text>
+        </Pressable>
+        <Pressable
+          style={styles.quickDayChip}
+          onPress={() => {
+            const tomorrow = new Date();
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            setSelectedDate(tomorrow);
+          }}
+        >
+          <Text style={styles.quickDayText}>{strings.calendar.tomorrow}</Text>
+        </Pressable>
+
         <Pressable
           style={styles.dayNavButton}
           onPress={() => setSelectedDate((d) => shiftDay(d, -1))}
@@ -184,7 +317,7 @@ export function CalendarTab() {
 
         <Pressable style={styles.dayNavCenter} onPress={goToday}>
           <Text style={styles.dayNavDate}>
-            {selectedDate.toLocaleDateString('sv-SE', {
+            {selectedDate.toLocaleDateString(speechTag, {
               day: 'numeric',
               month: 'short',
               year: 'numeric',
@@ -229,10 +362,23 @@ export function CalendarTab() {
         <View style={styles.emptyWrap}>
           <Ionicons name="calendar-outline" size={40} color={COLORS.textMuted} />
           <Text style={styles.emptyTitle}>Inga möten</Text>
-          <Text style={styles.emptyText}>Inget planerat denna dag i dina kalendrar.</Text>
+          <Text style={styles.emptyText}>{getEmptyDayMessage()}</Text>
+          <Pressable style={styles.primaryButton} onPress={() => setBookModalVisible(true)}>
+            <Text style={styles.primaryButtonText}>Lägg till</Text>
+          </Pressable>
         </View>
       ) : (
-        <ScrollView style={styles.list} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          style={styles.list}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor={COLORS.purple}
+            />
+          }
+        >
           {events.map((event) => {
             const isExpanded = expandedId === event.id;
             return (
@@ -259,7 +405,31 @@ export function CalendarTab() {
                   {isExpanded && event.notes ? (
                     <Text style={styles.eventNotes}>{event.notes}</Text>
                   ) : null}
+                  {isExpanded ? (
+                    <Pressable
+                      style={styles.deleteEventButton}
+                      onPress={(e) => {
+                        e.stopPropagation?.();
+                        confirmDeleteEvent(event);
+                      }}
+                    >
+                      <Ionicons name="trash-outline" size={16} color="#FF8A8A" />
+                      <Text style={styles.deleteEventText}>Ta bort möte</Text>
+                    </Pressable>
+                  ) : null}
                 </View>
+                <Pressable
+                  style={styles.deleteIconButton}
+                  onPress={(e) => {
+                    e.stopPropagation?.();
+                    confirmDeleteEvent(event);
+                  }}
+                  hitSlop={8}
+                  accessibilityLabel="Ta bort möte"
+                  accessibilityRole="button"
+                >
+                  <Ionicons name="trash-outline" size={20} color="#FF8A8A" />
+                </Pressable>
                 <Ionicons
                   name={isExpanded ? 'chevron-up' : 'chevron-down'}
                   size={16}
@@ -271,6 +441,16 @@ export function CalendarTab() {
           <Text style={styles.footerHint}>{getPlatformCalendarHint()}</Text>
         </ScrollView>
       )}
+
+      {bookModalVisible ? (
+        <BookEventModal
+          visible={bookModalVisible}
+          selectedDate={selectedDate}
+          userId={userId}
+          onClose={() => setBookModalVisible(false)}
+          onBooked={handleBooked}
+        />
+      ) : null}
     </View>
   );
 }
@@ -278,6 +458,53 @@ export function CalendarTab() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
   header: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 8 },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  deleteAllButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 138, 138, 0.45)',
+    backgroundColor: 'rgba(255, 138, 138, 0.08)',
+  },
+  deleteAllButtonText: {
+    color: '#FF8A8A',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  bookButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: COLORS.purple,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 12,
+  },
+  bookButtonText: {
+    color: COLORS.text,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  successBanner: {
+    marginTop: 8,
+    fontSize: 13,
+    color: '#8AE6A0',
+    fontWeight: '500',
+  },
   title: { fontSize: 22, fontWeight: '600', color: COLORS.text },
   sub: { fontSize: 13, color: COLORS.purple, marginTop: 2 },
   dayNav: {
@@ -285,7 +512,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     marginBottom: 8,
-    gap: 8,
+    gap: 6,
+  },
+  quickDayChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: COLORS.purpleMuted,
+    borderWidth: 1,
+    borderColor: 'rgba(139, 124, 247, 0.35)',
+  },
+  quickDayText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.purple,
   },
   dayNavButton: {
     width: 40,
@@ -325,6 +565,16 @@ const styles = StyleSheet.create({
     color: COLORS.textMuted,
   },
   list: { flex: 1, paddingHorizontal: 16 },
+  scrollContent: { paddingBottom: 24 },
+  eventsSection: { paddingHorizontal: 16, marginTop: 8, width: '100%' },
+  sectionLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.purple,
+    marginBottom: 8,
+    textTransform: 'uppercase',
+  },
+  eventMeta: { fontSize: 12, color: COLORS.textMuted, marginTop: 4 },
   eventCard: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -359,6 +609,22 @@ const styles = StyleSheet.create({
     marginTop: 8,
     lineHeight: 20,
     opacity: 0.9,
+  },
+  deleteEventButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 12,
+    paddingVertical: 8,
+  },
+  deleteEventText: {
+    fontSize: 13,
+    color: '#FF8A8A',
+    fontWeight: '600',
+  },
+  deleteIconButton: {
+    padding: 6,
+    marginLeft: 4,
   },
   loadingWrap: {
     flex: 1,
@@ -462,7 +728,7 @@ const styles = StyleSheet.create({
   },
   codeLabel: {
     fontSize: 12,
-    color: COLORS.muted,
+    color: COLORS.textMuted,
     fontWeight: '600',
     marginBottom: 4,
   },
