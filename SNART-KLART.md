@@ -1,61 +1,60 @@
-# My Assistant — nästan klart
+# My Assistant — status (v1.7.5)
 
-## Klart i koden (v1.2.3)
+Senast uppdaterad: 2025-06-25
 
-- Hem: hälsning, klocka, väder, möten, uppgifter
-- Assistent: röst, minne, kalenderfrågor, påminnelser, boka möten
-- Kalender: telefonkalender + lokala händelser, i18n
-- Notiser: expo-notifications (native), mötes- och uppgiftspåminnelser
-- Språk: 24 språk + auto från telefon
-- Gästläge: ingen inloggning krävs (`local-guest`)
+## Klart och testat på telefon
 
-## Det som återstår (gör vi tillsammans)
+- **Hem** — hälsning, klocka, väder, möten, uppgifter, profilbild (galleri + ikoner)
+- **Assistent** — röst in/ut (Alma TTS), transkript, boka möten, påminnelser, snabbfraser
+- **Kalender** — telefonkalender + lokala händelser
+- **Uppgifter** — skapa, påminnelser
+- **Notiser** — mötes- och uppgiftspåminnelser
+- **Språk** — 24 språk + auto från telefon
+- **Gästläge** — ingen inloggning krävs (`local-guest`)
+- **"Jag är sjuk"** — bekräftelse innan avbokning
+- **GitHub** — kod på `main`: https://github.com/Abdisefta/MyAssistant
 
-### Steg 1 — Windows långa sökvägar (2 min, admin)
+## Bygg ny APK (Windows)
 
-PowerShell **som administratör**:
+Senaste skript: `build-175.ps1`
 
 ```powershell
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\FileSystem" /v LongPathsEnabled /t REG_DWORD /d 1 /f
+cd C:\Users\user\My-assistent\MyAssistant\MyAssistantFinal
+powershell -ExecutionPolicy Bypass -File .\build-175.ps1
 ```
 
-Starta om datorn.
+APK hamnar på skrivbordet: `MyAssistant175.apk`
 
-### Steg 2 — Bygg APK (jag kör eller du dubbelklickar)
+Kräver `.env` med `EXPO_PUBLIC_*` (kopiera från `.env.example`). Committa aldrig `.env`.
 
-Dubbelklicka:
+## Kvar — behöver Abdi (5–15 min vardera)
 
-`MyAssistantFinal\build-apk.bat`
+| Uppgift | Varför jag inte kan göra det själv |
+|---------|-------------------------------------|
+| **Google-inloggning + Gmail** | SHA-1 från release-keystore måste läggas i Firebase Console |
+| **Testa e-post på telefon** | Kräver att du loggar in med Google och trycker Tillåt |
+| **Play Store** | Kräver Google Play Developer-konto och betalning |
+| **HTTPS på TTS** | Kräver domän + certifikat på VPS (valfritt — HTTP funkar nu) |
 
-Eller säg **"bygg"** — jag kör det.
+### Google / Gmail — när du vill fixa
 
-APK hamnar här:
-
-`MyAssistantFinal\android\app\build\outputs\apk\debug\app-debug.apk`
-
-### Steg 3 — Installera på Realme (~5 min)
-
-1. Kopiera APK till telefonen
-2. Inställningar → Säkerhet → Installera okända appar → tillåt
-3. Öppna APK → Installera
-4. Tillåt **Kalender** och **Notiser** i appen
-
-### Steg 4 — Testa utan inloggning
-
-- **Hem** — namn, väder, möten
-- **Kalender** → Tillåt kalender
-- **Assistent** — prata, påminnelse, boka möte
-- **Notiser** — ska fråga vid start
-
-### Senare (medvetet sist)
-
-- **Gmail / Google-inloggning** — SHA-1 finns redan i Firebase
+1. Bygg/installera senaste APK (`build-175.ps1`)
+2. Firebase → Project settings → Android app → **Add fingerprint**
+3. SHA-1 från din release-keystore (samma som APK-signeringen)
+4. Vänta 5–10 min → öppna appen → **Email** → **Koppla Google Mail**
 
 ## Felsökning
 
 | Problem | Lösning |
 |---------|---------|
-| Filename longer than 260 | Steg 1 (långa sökvägar) |
-| Åtkomst nekad i PowerShell | Kör som administratör |
+| Ingen Alma-röst | Inställningar → Testa Alma-röst. Höj **mediavolym**. Installera senaste APK. |
+| Network request failed (TTS) | v1.7.5+ — cleartext fix. Bygg om med `build-175.ps1`. |
+| Gemini svarar inte | Kontrollera `EXPO_PUBLIC_GEMINI_API_KEY` i `.env` (måste vara `AIzaSy...`). |
 | Kalender tom | Tillåt kalender i appen + telefonens inställningar |
-| Notiser funkar inte | Ny APK + tillåt notiser |
+| Google DEVELOPER_ERROR | Lägg till SHA-1 i Firebase (se ovan) |
+| Gradle byggfel | Kör `scripts/prefetch-android-minimal.ps1`, aktivera långa sökvägar i Windows |
+
+## Föråldrade filer
+
+- `IMORGON-GEMINI-FIX.md` — historik från juni, Gemini är fixat
+- `NAR-DU-VAKNAR.md` — gammal USB/Expo Go-guide

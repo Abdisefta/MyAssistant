@@ -1,3 +1,5 @@
+> **FÖRÅLDRAD** — gäller v1.2.1 via Expo Go. Nu: installera APK från `build-175.ps1`. Se `SNART-KLART.md`.
+
 # När du vaknar — 3 steg (Google-inloggning fixad)
 
 Jag har fixat Google-inloggning för din **v1.2.1 USB-app**. Du behöver **inte** göra något i Firebase.

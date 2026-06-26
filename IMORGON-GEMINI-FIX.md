@@ -1,3 +1,5 @@
+> **FÖRÅLDRAD (2025-06-18)** — Gemini fungerar nu. Se `SNART-KLART.md`.
+
 # Imorgon — fixa Gemini (läs detta först)
 
 **Datum paus:** 2025-06-18 kväll  

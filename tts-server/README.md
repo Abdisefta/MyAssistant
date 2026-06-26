@@ -43,6 +43,23 @@ Valfri miljövariabel i `docker-compose.yml`:
 
 - `TTS_PORT` — extern port (standard 3001)
 
+## HTTPS (valfritt — kräver domän)
+
+HTTP funkar i appen idag (v1.7.5+ med cleartext). För produktion rekommenderas HTTPS:
+
+1. Peka domän (t.ex. `tts.example.com`) till VPS IP
+2. Installera Caddy eller nginx + Let's Encrypt
+3. Proxy till `localhost:3001`
+4. Sätt `EXPO_PUBLIC_ALMA_TTS_URL=https://tts.example.com` och bygg om appen
+
+Exempel (Caddy):
+
+```
+tts.example.com {
+  reverse_proxy localhost:3001
+}
+```
+
 ## Felsökning
 
 - `503` på `/health` — rösten laddades inte; bygg om imagen.

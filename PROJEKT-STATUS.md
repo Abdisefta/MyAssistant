@@ -1,68 +1,64 @@
-# My Assistant — projektstatus (uppdaterad 2025-06-18)
+# My Assistant — projektstatus
 
-**NY AGENT:** Läs först `HANDOFF-AGENT.md` i samma mapp.
+**Senast uppdaterad:** 2025-06-25 · **Version:** 1.7.5 (versionCode 21)
 
-Sammanfattning av vad som gjorts och vad som återstår. Läs denna fil när du fortsätter.
+**Läs först:** `SNART-KLART.md` (kort för Abdi) eller `HANDOFF-AGENT.md` (för Cursor-agent).
 
 ## Projekt
-- **App:** My Assistant (Expo React Native)
-- **Sökväg:** `C:\Users\user\My-assistent\MyAssistant\MyAssistantFinal`
-- **Paket:** `com.abdisefta.myassistantfinal`
-- **Version:** 1.0.4
-- **Expo/EAS:** inloggad som `abdisefta`, projectId `22e289d9-e041-4b20-a6c8-ec007b28d559`
-- **GitHub:** https://github.com/Abdisefta/MyAssistant
 
-## Vad fungerar ✅
-- Mörk UI, lila orb, 5 flikar (Email, Kalender, Assistent, Uppgifter, Inställningar)
-- **Kalender** — läser möten från telefonen
-- **Email** — Gmail läsa + skicka (Email-fliken; `gmail.send` finns)
-- **EAS build** — preview APK
-- **Röst IN** — mikrofon + transkription (STT funkar på telefon)
-- **Personligt minne** — AsyncStorage, per Firebase `uid`
-- **Firebase Auth** — kod för Google + e-post + Apple (iOS)
-- **GitHub** — kod på `main`
-- **Play Store-material** — `store/` (privacy policy, beskrivningar, data safety)
-- **Mötesnotiser** — kod finns (15 min före möte)
+| | |
+|--|--|
+| App | My Assistant (Expo React Native, SDK 54) |
+| Sökväg | `C:\Users\user\My-assistent\MyAssistant\MyAssistantFinal` |
+| Paket | `com.abdisefta.myassistantfinal` |
+| GitHub | https://github.com/Abdisefta/MyAssistant |
+| Firebase | `my-assistant-7f68b` |
+| Alma TTS | `http://195.201.128.118:3001` (Hetzner VPS) |
+| EAS | `abdisefta` / projectId `22e289d9-e041-4b20-a6c8-ec007b28d559` |
 
-## Pågår / senaste steg (paus)
-- **Gemini + röst UT** — ny API-nyckel (`AQ....`) satt i EAS preview; ny build startad
-- **Firebase på telefon** — projekt `my-assistant-7f68b`, web + Android app, Auth enabled
-- **EAS env** — `EXPO_PUBLIC_GEMINI_API_KEY` + delvis Firebase i preview
-- **Efter paus:** installera ny APK → testa *"kan du påminna mig om att handla maten"*
+## Fungerar på telefon (bekräftat)
 
-## Snabbkommandon (PowerShell i projektmappen)
+- Gästläge, hem, kalender, uppgifter, assistent (text + röst)
+- Alma TTS (v1.7.5 — Android cleartext + base64-fix)
+- Profilbild från galleri
+- 24 språk, notiser, sjuk-dag med bekräftelse
+- Lokal release-APK via `build-175.ps1` → Desktop
+
+## Blockerat — kräver användaren
+
+1. **Gmail / Google Sign-In** — SHA-1 i Firebase för release-keystore
+2. **Play Store-publicering** — developer-konto
+3. **HTTPS TTS** — domän + Let's Encrypt på VPS (valfritt)
+
+## Teknisk skuld / kan göras utan användaren
+
+- [x] Uppdatera dokumentation (denna fil, SNART-KLART, README)
+- [ ] EAS env sync (`scripts/push-eas-env.ps1`) — kräver Expo-inloggning
+- [ ] HTTPS på TTS-server — kräver VPS/root
+- [ ] Röst → skicka mail (feature, kod finns delvis)
+- [ ] Admin-dashboard (planerat)
+
+## Byggkommandon
 
 ```powershell
 cd C:\Users\user\My-assistent\MyAssistant\MyAssistantFinal
 
-# Pusha alla EXPO_PUBLIC_* från .env till EAS (preview)
-.\scripts\push-eas-env.ps1
+# Lokal release-APK (rekommenderat)
+powershell -ExecutionPolicy Bypass -File .\build-175.ps1
 
-# Bygg APK
+# EAS cloud build (alternativ)
+.\scripts\push-eas-env.ps1
 npx eas-cli build --platform android --profile preview
 ```
 
-Alternativ: Expo webb → Project → **Environment variables** (lättare än CLI).
+## Nycklar och hemligheter
 
-## NÄSTA FEATURE — sparad av användaren
-
-**Kommando:** *"bygg skicka mail via röst"*
-
-**Flöde:** förstå → hitta e-post → Gemini skriver → förhandsgranska → bekräfta → skicka via Gmail.
-
-## PLAN — Egen admin-dashboard (bygg sen)
-
-**Kommando:** *"bygg admin-dashboard"*
-
-## Kvar efter assistenten funkar
-1. **Röst → skicka mail**
-2. Fullständiga Firebase-variabler i EAS + test inloggning på telefon
-3. Production build → Play Store (byt e-post i `store/privacy-policy.md`)
-4. Betalning / prenumeration
-5. Admin-dashboard
-6. App Store, Outlook, riktig körtid i briefing
+- Alla API-nycklar i `.env` (gitignored)
+- `.env.example` visar vilka variabler som behövs
+- GitHub push protection — inga nycklar i kod
 
 ## Säg till Cursor
-- Fortsätt: *"Läs PROJEKT-STATUS.md och fortsätt"*
-- Mail via röst: *"bygg skicka mail via röst"*
-- Dashboard: *"bygg admin-dashboard"*
+
+- *"Läs PROJEKT-STATUS.md och fortsätt"*
+- *"Fixa Google-inloggning"* — guidar SHA-1-steg med användaren
+- *"Bygg"* — kör `build-175.ps1`

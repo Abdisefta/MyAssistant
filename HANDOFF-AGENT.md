@@ -1,141 +1,61 @@
-# Handoff för ny Cursor-agent — läs detta först
+# Handoff för Cursor-agent
 
-**Datum:** 2025-06-18  
-**Användare:** Abdi (abdisefta85@gmail.com)  
-**Projekt:** My Assistant — Expo React Native app
+**Senast uppdaterad:** 2025-06-25 · **Version:** 1.7.5
 
----
+## Snabbstart
 
-## Sökväg och länkar
+| | |
+|--|--|
+| Kod | `C:\Users\user\My-assistent\MyAssistant\MyAssistantFinal` |
+| GitHub | https://github.com/Abdisefta/MyAssistant (`main`) |
+| Användare | Abdi — abdisefta85@gmail.com, föredrar enkla steg på svenska |
+| Expo SDK | 54 — läs https://docs.expo.dev/versions/v54.0.0/ |
+| Bygg APK | `build-175.ps1` → `MyAssistant175.apk` på Desktop |
 
-| Vad | Var |
-|-----|-----|
-| App-kod | `C:\Users\user\My-assistent\MyAssistant\MyAssistantFinal` |
-| GitHub | https://github.com/Abdisefta/MyAssistant (branch `main`) |
-| Expo/EAS | https://expo.dev/accounts/abdisefta/projects/MyAssistantFinal |
-| Firebase | Projekt `my-assistant-7f68b` |
-| Paketnamn Android | `com.abdisefta.myassistantfinal` |
-| App-version i kod | **1.0.8** (senaste commit: Gemini key fix) |
+## Vad fungerar
 
----
+- Gästläge (`local-guest`), alla flikar utom full Gmail-koppling
+- Alma TTS via `http://195.201.128.118:3001` (cleartext fix i v1.7.5)
+- Gemini via `EXPO_PUBLIC_GEMINI_API_KEY` i `.env` (AIzaSy, inte AQ)
+- Profilbild, sjuk-dag, i18n, notiser, kalender
 
-## Vad fungerar på telefonen
+## Aktiva blockerare (kräver användaren)
 
-- Appen **startar** (krasch fixad i v1.0.7 — tog bort `@google/genai`)
-- **Mörk UI**, 5 flikar, kalender läser möten
-- **Mikrofon + transkription** (röst in funkar — text syns i TRANSKRIPT)
-- **Ingen inloggningsskärm** — `useAppAuth({ enabled: false })` + `guestMode` default
+### Gmail — DEVELOPER_ERROR
 
----
+- Release-APK SHA-1 saknas i Firebase
+- Användaren måste: Firebase → Android app → Add fingerprint
+- Ingen ny build behövs efter SHA-1 — bara vänta 5–10 min
 
-## Aktiva problem (prioritet)
+### Play Store / HTTPS TTS
 
-### 1. Gemini — "Ogiltig API-nyckel"
+- Medvetet pausat tills användaren vill
 
-- Användaren får fel i appen när assistenten ska svara
-- **Orsak:** EAS `preview` har `EXPO_PUBLIC_GEMINI_API_KEY` som kan vara **gammal/fel** och överstyr inbakad nyckel vid build
-- **Inbakad nyckel** i `constants/gemini.ts` → `EXPO_PUBLIC_GEMINI_API_KEY` i `.env` (committas aldrig)
-- **Fix i kod (v1.0.8):** `getGeminiApiKeyCandidates()` provar inbakad nyckel **först**, sedan EAS-env
-- **Om fortfarande fel:** Skapa **ny nyckel** i https://aistudio.google.com/apikey → uppdatera `BAKED_GEMINI_KEY` → bygg om
-- **Alternativ:** Radera fel nyckel i EAS: `npx eas-cli env:delete --variable-name EXPO_PUBLIC_GEMINI_API_KEY --environment preview`
+## Viktiga filer
 
-### 2. Gmail — DEVELOPER_ERROR (SHA-1)
+| Område | Filer |
+|--------|-------|
+| Assistent-UI | `components/assistant-screen.tsx` |
+| Alma TTS | `services/alma-tts.ts`, `constants/alma-tts.ts` |
+| Hem / profil | `components/home-tab.tsx`, `services/profile-photo.ts` |
+| Version | `constants/app-version.ts`, `app.json` |
+| Bygg | `build-175.ps1`, `scripts/prefetch-android-minimal.ps1` |
+| Nätverk Android | `plugins/with-android-cleartext.js` |
 
-- Email-fliken: "Google-inställning fel (DEVELOPER_ERROR). Kontrollera SHA-1"
-- **Orsak:** Användaren **raderade** Expo Android credentials; ny keystore behöver SHA-1 i Firebase
-- **Användaren svarade Y** på "Generate a new Android Keystore?" under senaste `eas build`
-- **Efter build klart:**
-  1. Expo → Credentials → `com.abdisefta.myassistantfinal` → kopiera **SHA-1**
-  2. Firebase → Project settings → Android app → **Add fingerprint** (SHA-1)
-  3. Vänta 5–10 min → testa "Koppla Google Mail" igen (ingen ny build behövs för SHA-1)
+## Byggflöde (Windows)
 
----
+1. `robocopy` → `C:\b`
+2. `npm ci` + prefetch-skript (Maven SSL-problem på build-PC)
+3. `newArchEnabled=true` i gradle.properties
+4. Gradle retry-loop med `local-maven`
+5. Kopiera APK till Desktop
 
-## Senaste EAS-build
+## Regler
 
-- Användaren körde `npx eas-cli build --platform android --profile preview`
-- Svarade **Y** på ny keystore
-- **Vänta på Build finished** → installera APK på telefon
-- Bygget inkluderar v1.0.8 om det startades efter senaste kodändringar — **verifiera** att commit `64baad7` (v1.0.8) är i build
+- Committa aldrig `.env` eller API-nycklar
+- Committa bara när användaren ber om det
+- Minimera diff — matcha befintlig kodstil
 
----
+## Säg till agenten
 
-## Firebase (redan konfigurerat)
-
-- Web + Android app registrerade
-- Auth: Email, Google, Apple enabled
-- **Web client ID:** `194397490077-ufj8ubshkv7qjqubmmaptob7p6s680m1.apps.googleusercontent.com`
-- Inbakad i `constants/firebase.ts` och `google-signin-config.ts`
-- `.env` på datorn har alla värden (committa aldrig `.env`)
-
----
-
-## EAS environment (preview)
-
-Laddas vid build (kan vara ofullständigt):
-
-- `EXPO_PUBLIC_GEMINI_API_KEY` — finns men kan vara **fel**
-- `EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN` — finns
-- **Saknas i EAS** (men inbakade i kod): övriga Firebase-variabler
-
-Script för att pusha `.env` till EAS: `.\scripts\push-eas-env.ps1`
-
----
-
-## Viktiga kodändringar (senaste session)
-
-| Version | Vad |
-|---------|-----|
-| 1.0.7 | Tog bort `@google/genai` (krasch), `useAppAuth({ enabled: false })` |
-| 1.0.8 | Gemini: inbakad nyckel först, Bearer header för AQ-nycklar |
-| — | Firebase + Google client ID inbakade i kod |
-| — | Guest mode — ingen auth-gate |
-
-**INTE använda `@google/genai`** — kraschar React Native.
-
----
-
-## Nästa steg för användaren (i ordning)
-
-1. **Vänta** tills EAS build = **Build finished**
-2. Skriv **`n`** om emulator-fråga
-3. **Installera** APK på telefon (QR-kod)
-4. **Testa assistenten** — säg "kan du påminna mig om att handla maten"
-5. Om Gemini fortfarande fel → ny API-nyckel i AI Studio + uppdatera kod + rebuild
-6. **SHA-1:** Expo Credentials → kopiera → Firebase Android app → Add fingerprint
-7. Testa **Koppla Google Mail** i Email-fliken
-8. Om allt funkar → `npx eas-cli env:delete` fel Gemini-nyckel ELLER uppdatera med rätt nyckel
-
----
-
-## Planerat (inte gjort än)
-
-- **Röst → skicka mail** — kommando: "bygg skicka mail via röst" (se `PROJEKT-STATUS.md`)
-- Play Store publicering (`store/` finns)
-- Admin-dashboard (senare)
-- Firebase-inloggning i appen (kod finns, avstängd för MVP)
-
----
-
-## Hur användaren vill bli guidad
-
-- **Svenska**
-- **2 steg i taget** — inte allt på en gång
-- Exakt **knapptext** (t.ex. "Continue to console", "Next", "Y")
-- PowerShell: `cd C:\Users\user\My-assistent\MyAssistant\MyAssistantFinal`
-
----
-
-## Kommandon som ofta används
-
-```powershell
-cd C:\Users\user\My-assistent\MyAssistant\MyAssistantFinal
-npx eas-cli build --platform android --profile preview
-.\scripts\push-eas-env.ps1
-```
-
----
-
-## Säg till ny agent
-
-> "Läs HANDOFF-AGENT.md och PROJEKT-STATUS.md i MyAssistantFinal. Fortsätt fixa Gemini API-nyckel och SHA-1 för Gmail. Användaren väntar på EAS-build eller har just installerat ny APK."
+> "Läs HANDOFF-AGENT.md och SNART-KLART.md. Fortsätt med [uppgift]."
