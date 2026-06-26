@@ -4,6 +4,7 @@ import {
   getGeminiApiKeyCandidates,
   validateGeminiApiKey,
 } from '@/constants/gemini';
+import { trackAnalyticsEvent } from '@/services/analytics-sync';
 import type { ConversationMessage } from '@/types/memory';
 
 type GeminiRole = 'user' | 'model';
@@ -153,7 +154,9 @@ async function callGemini(
 
     for (const model of GEMINI_MODELS) {
       try {
-        return await callGeminiOnce(model, apiKey, systemInstruction, contents);
+        const text = await callGeminiOnce(model, apiKey, systemInstruction, contents);
+        void trackAnalyticsEvent('gemini_request', { model });
+        return text;
       } catch (err) {
         lastError = err instanceof Error ? err : new Error(String(err));
         console.warn(`Gemini ${model} key=${apiKey.slice(0, 8)}...`, lastError.message);

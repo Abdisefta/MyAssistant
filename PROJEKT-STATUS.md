@@ -1,6 +1,6 @@
 # My Assistant — projektstatus
 
-**Senast uppdaterad:** 2025-06-25 · **Version:** 1.7.5 (versionCode 21)
+**Senast uppdaterad:** 2025-06-25 · **Version:** 1.7.6 (versionCode 22)
 
 **Läs först:** `SNART-KLART.md` (kort för Abdi) eller `HANDOFF-AGENT.md` (för Cursor-agent).
 
@@ -36,7 +36,7 @@
 - [ ] EAS env sync (`scripts/push-eas-env.ps1`) — kräver Expo-inloggning
 - [ ] HTTPS på TTS-server — kräver VPS/root
 - [ ] Röst → skicka mail (feature, kod finns delvis)
-- [ ] Admin-dashboard (planerat)
+- [x] Admin-dashboard (`analytics-server/` — deploy till VPS)
 
 ## Byggkommandon
 

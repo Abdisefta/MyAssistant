@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>My Assistant — Admin</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div id="login-screen" class="screen">
+    <div class="login-card">
+      <h1>My Assistant</h1>
+      <p class="muted">Admin-dashboard</p>
+      <input id="password-input" type="password" placeholder="Lösenord" autocomplete="current-password" />
+      <button id="login-btn" type="button">Logga in</button>
+      <p id="login-error" class="error hidden"></p>
+    </div>
+  </div>
+
+  <div id="app-screen" class="screen hidden">
+    <header class="topbar">
+      <div>
+        <h1>My Assistant Admin</h1>
+        <p id="updated-at" class="muted"></p>
+      </div>
+      <button id="logout-btn" type="button" class="ghost">Logga ut</button>
+    </header>
+
+    <main class="grid">
+      <section class="cards" id="stat-cards"></section>
+
+      <section class="panel">
+        <h2>Nedladdningar / nya enheter (30 dagar)</h2>
+        <div id="install-chart" class="chart"></div>
+      </section>
+
+      <section class="panel">
+        <h2>App-öppningar (30 dagar)</h2>
+        <div id="opens-chart" class="chart"></div>
+      </section>
+
+      <section class="panel half">
+        <h2>App-versioner</h2>
+        <div id="version-list" class="list"></div>
+      </section>
+
+      <section class="panel half">
+        <h2>Plattformar</h2>
+        <div id="platform-list" class="list"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Utgifter</h2>
+        <p class="muted" id="expense-summary"></p>
+        <form id="expense-form" class="expense-form">
+          <input name="label" placeholder="Beskrivning (t.ex. Hetzner VPS)" required />
+          <input name="amount" type="number" step="0.01" min="0" placeholder="Belopp (SEK)" required />
+          <select name="category">
+            <option value="hosting">Hosting</option>
+            <option value="api">API (Gemini m.m.)</option>
+            <option value="tools">Verktyg</option>
+            <option value="other">Övrigt</option>
+          </select>
+          <select name="recurring">
+            <option value="once">Engång</option>
+            <option value="monthly">Månadsvis</option>
+          </select>
+          <input name="note" placeholder="Anteckning (valfritt)" />
+          <button type="submit">Lägg till</button>
+        </form>
+        <div id="expense-list" class="list"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Senaste enheter</h2>
+        <div id="device-list" class="table-wrap"></div>
+      </section>
+
+      <section class="panel half">
+        <h2>Serverstatus</h2>
+        <div id="server-status" class="list"></div>
+      </section>
+
+      <section class="panel half">
+        <h2>Uppskattade API-kostnader (7 dagar)</h2>
+        <div id="cost-estimate" class="list"></div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/dashboard.js"></script>
+</body>
+</html>

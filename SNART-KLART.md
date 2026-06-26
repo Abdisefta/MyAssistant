@@ -12,7 +12,18 @@ Senast uppdaterad: 2025-06-25
 - **Språk** — 24 språk + auto från telefon
 - **Gästläge** — ingen inloggning krävs (`local-guest`)
 - **"Jag är sjuk"** — bekräftelse innan avbokning
+- **Admin-dashboard** — kod klar i `analytics-server/` (deploy till VPS)
 - **GitHub** — kod på `main`: https://github.com/Abdisefta/MyAssistant
+
+## Admin-dashboard
+
+Webb-UI för dig: användare, nedladdningar, utgifter, serverstatus.
+
+1. Deploy på Hetzner: se `analytics-server/README.md`
+2. Öppna `http://195.201.128.118:3002` (efter deploy + port 3002 öppen)
+3. Bygg app v1.7.6+ så telefonen skickar statistik
+
+Standardlösenord byts i `.env` på servern (`ADMIN_PASSWORD`).
 
 ## Bygg ny APK (Windows)
 

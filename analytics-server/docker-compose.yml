@@ -1,0 +1,20 @@
+services:
+  analytics:
+    build: .
+    container_name: myassistant-analytics
+    ports:
+      - "${ANALYTICS_PORT:-3002}:3002"
+    environment:
+      PORT: 3002
+      DATA_DIR: /data
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-myassistant-admin}
+      ANALYTICS_API_KEY: ${ANALYTICS_API_KEY:-myassistant-analytics-key}
+      TTS_HEALTH_URL: ${TTS_HEALTH_URL:-http://host.docker.internal:3001/health}
+    volumes:
+      - analytics-data:/data
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  analytics-data:

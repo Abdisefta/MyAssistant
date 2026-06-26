@@ -32,6 +32,10 @@ APK: `C:\Users\user\Desktop\MyAssistant175.apk`
 
 Se `tts-server/README.md` — Docker-baserad Piper TTS.
 
+## Admin-dashboard
+
+Se `analytics-server/README.md` — användare, nedladdningar, utgifter, serverstatus.
+
 ## Dokumentation
 
 | Fil | Innehåll |

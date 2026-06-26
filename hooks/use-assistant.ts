@@ -50,6 +50,7 @@ import {
   clearConversationHistory,
 } from '@/services/memory';
 import { recordAssistantMessage } from '@/services/usage-stats';
+import { trackAnalyticsEvent } from '@/services/analytics-sync';
 import { setNotificationAlertStyle } from '@/services/notification-settings';
 import { initAssistantVoice, speakAssistant } from '@/services/speech';
 import { cancelTaskReminder, scheduleTaskReminder } from '@/services/task-reminders';
@@ -321,6 +322,7 @@ export function useAssistant(userId?: string, options: UseAssistantOptions = {})
       if (!trimmed || !memory || isThinking) return;
 
       void recordAssistantMessage(userIdRef.current);
+      void trackAnalyticsEvent('assistant_message');
 
       const userMessage = createMessage('user', trimmed);
       const historyWithUser = [...memory.conversationHistory, userMessage];

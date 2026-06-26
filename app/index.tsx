@@ -35,6 +35,7 @@ import {
 import { setLocalCalendarUserId, migrateLegacyCalendarEvents } from '@/services/local-calendar-store';
 import { bootstrapAppPermissions } from '@/services/app-permissions';
 import { recordAppOpen, recordUsageMinute } from '@/services/usage-stats';
+import { trackAppLaunch } from '@/services/analytics-sync';
 import type { NotificationAlertStyle } from '@/types/memory';
 
 type TabId = 'hem' | 'email' | 'kalender' | 'assistent' | 'uppgifter' | 'installningar';
@@ -320,6 +321,7 @@ export default function HomeScreen() {
     void migrateLegacyCalendarEvents(GUEST_USER_ID);
     void bootstrapAppPermissions();
     void recordAppOpen(GUEST_USER_ID);
+    void trackAppLaunch();
   }, []);
 
   useEffect(() => {

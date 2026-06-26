@@ -9,6 +9,7 @@ import {
   ALMA_TTS_REQUEST_TIMEOUT_MS,
   ALMA_TTS_RETRY_DELAY_MS,
 } from '@/constants/alma-tts';
+import { trackAnalyticsEvent } from '@/services/analytics-sync';
 
 let currentSound: Audio.Sound | null = null;
 let playbackGeneration = 0;
@@ -124,7 +125,9 @@ export async function fetchAlmaSpeechAudio(text: string): Promise<Uint8Array> {
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
-      return await fetchAlmaSpeechAudioOnce(trimmed);
+      const audio = await fetchAlmaSpeechAudioOnce(trimmed);
+      void trackAnalyticsEvent('tts_request', { chars: trimmed.length });
+      return audio;
     } catch (err) {
       lastError = formatAlmaFetchError(err);
       const retryable =
