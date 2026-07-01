@@ -9,6 +9,10 @@ import {
   assistantAskedAboutSickDay,
   continueEmailConversation,
   executeSickDayAction,
+  executeJunkCleanup,
+  buildJunkCleanupPreview,
+  prepareJunkCleanup,
+  looksLikeJunkCleanupRequest,
   handleTaskReminderRequest,
   handleBirthdaySaveRequest,
   looksLikeBirthdaySaveRequest,
@@ -60,7 +64,7 @@ import { initAssistantVoice, speakAssistant } from '@/services/speech';
 import { cancelTaskReminder, scheduleTaskReminder } from '@/services/task-reminders';
 import { hapticSuccess } from '@/utils/haptics';
 import type { AgentTask, ConversationMessage, NotificationAlertStyle, TaskRecurrence, UserMemory } from '@/types/memory';
-import type { PendingCalendarBooking, PendingEmailDraft, PendingSickDay } from '@/types/assistant';
+import type { PendingCalendarBooking, PendingEmailDraft, PendingJunkCleanup, PendingSickDay } from '@/types/assistant';
 
 export type TranscriptEntry = {
   id: string;
@@ -152,6 +156,7 @@ export function useAssistant(userId?: string, options: UseAssistantOptions = {})
   const pendingEmailDraftRef = useRef<PendingEmailDraft | null>(null);
   const pendingCalendarBookingRef = useRef<PendingCalendarBooking | null>(null);
   const pendingSickDayRef = useRef<PendingSickDay | null>(null);
+  const pendingJunkCleanupRef = useRef<PendingJunkCleanup | null>(null);
 
   const [memory, setMemory] = useState<UserMemory | null>(null);
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
@@ -545,6 +550,36 @@ export function useAssistant(userId?: string, options: UseAssistantOptions = {})
           return;
         }
 
+        const pendingJunk = pendingJunkCleanupRef.current;
+        if (pendingJunk) {
+          if (isSendCancellation(trimmed)) {
+            pendingJunkCleanupRef.current = null;
+            await finishReply(memory, historyWithUser, 'OK, jag raderade inga mail.', trimmed);
+            return;
+          }
+          if (isAffirmativeReply(trimmed) || isBookingConfirmation(trimmed)) {
+            const token = await resolveGoogleToken(
+              () => getGoogleAccessToken?.() ?? null,
+              refreshGoogleAccessToken,
+            );
+            if (!token) {
+              pendingJunkCleanupRef.current = null;
+              throw new Error(strings.agent.gmailRequiredEmail);
+            }
+            const reply = await executeJunkCleanup(pendingJunk, token);
+            pendingJunkCleanupRef.current = null;
+            await finishReply(memory, historyWithUser, reply, trimmed);
+            return;
+          }
+          await finishReply(
+            memory,
+            historyWithUser,
+            buildJunkCleanupPreview(pendingJunk),
+            trimmed,
+          );
+          return;
+        }
+
         const pendingDraft = pendingEmailDraftRef.current;
         if (pendingDraft) {
           if (isSendCancellation(trimmed)) {
@@ -621,6 +656,30 @@ export function useAssistant(userId?: string, options: UseAssistantOptions = {})
               return;
             }
           }
+        }
+
+        if (looksLikeJunkCleanupRequest(trimmed)) {
+          const token = await resolveGoogleToken(
+            () => getGoogleAccessToken?.() ?? null,
+            refreshGoogleAccessToken,
+          );
+          if (!token) {
+            throw new Error(strings.agent.gmailRequiredEmail);
+          }
+          try {
+            const pending = await prepareJunkCleanup(token);
+            if (pending.messageIds.length === 0) {
+              await finishReply(memory, historyWithUser, buildJunkCleanupPreview(pending), trimmed);
+              return;
+            }
+            pendingJunkCleanupRef.current = pending;
+            await finishReply(memory, historyWithUser, buildJunkCleanupPreview(pending), trimmed);
+          } catch {
+            throw new Error(
+              'Kunde inte läsa skräpmail just nu. Koppla Gmail igen under Email om problemet kvarstår.',
+            );
+          }
+          return;
         }
 
         if (looksLikeEmailRequest(trimmed)) {
@@ -734,6 +793,8 @@ export function useAssistant(userId?: string, options: UseAssistantOptions = {})
   const clearHistory = useCallback(async () => {
     pendingEmailDraftRef.current = null;
     pendingCalendarBookingRef.current = null;
+    pendingSickDayRef.current = null;
+    pendingJunkCleanupRef.current = null;
     const updated = await clearConversationHistory(userIdRef.current);
     setMemory(updated);
     setTranscript(historyToTranscript([], strings.welcome.default));

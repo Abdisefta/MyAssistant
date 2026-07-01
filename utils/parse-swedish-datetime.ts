@@ -37,6 +37,29 @@ const MONTHS: Record<string, number> = {
   december: 12,
 };
 
+const HOUR_WORDS: Record<string, number> = {
+  noll: 0,
+  midnatt: 0,
+  en: 1,
+  ett: 1,
+  två: 2,
+  tva: 2,
+  tre: 3,
+  fyra: 4,
+  fyr: 4,
+  fem: 5,
+  sex: 6,
+  sju: 7,
+  sjua: 7,
+  åtta: 8,
+  atta: 8,
+  otta: 8,
+  nio: 9,
+  tio: 10,
+  elva: 11,
+  tolv: 12,
+};
+
 export function normalizeTimeInput(timeText: string): string {
   const trimmed = timeText.trim().replace(',', ':').replace('.', ':');
   if (/^\d{1,2}$/.test(trimmed)) {
@@ -82,29 +105,46 @@ export type ParsedReminder = {
   hint?: string;
 };
 
+function resolveSwedishConversationHour(hours: number, t: string): number {
+  if (hours >= 13) return hours;
+  if (/\b(på morgonen|morgon|förmiddag|formiddag|midnatt|natt)\b/.test(t)) {
+    return hours === 12 ? 0 : hours;
+  }
+  // Svenska vardagstal: "klockan tre" = 15:00, "kl 3" = 15:00
+  if (hours >= 1 && hours <= 6) return hours + 12;
+  return hours;
+}
+
 function extractTime(t: string): { hours: number; minutes: number; rangeEnd?: number } | null {
   const rangeMatch = t.match(/\b(\d{1,2})\s*[-–]\s*(\d{1,2})\b/);
   if (rangeMatch) {
-    const hours = Number(rangeMatch[1]);
-    const rangeEnd = Number(rangeMatch[2]);
+    const hours = resolveSwedishConversationHour(Number(rangeMatch[1]), t);
+    const rangeEnd = resolveSwedishConversationHour(Number(rangeMatch[2]), t);
     if (hours > 23 || rangeEnd > 23) return null;
     return { hours, minutes: 0, rangeEnd };
   }
 
+  const klWord = t.match(/\b(?:kl\.?|klockan)\s+([a-zåäö]+)\b/);
+  if (klWord && HOUR_WORDS[klWord[1]] != null) {
+    const hours = resolveSwedishConversationHour(HOUR_WORDS[klWord[1]], t);
+    return { hours, minutes: 0 };
+  }
+
   const klMatch = t.match(/\b(?:kl\.?|klockan)\s*(\d{1,2})(?:[:.](\d{1,2}))?\b/);
   if (klMatch) {
-    return { hours: Number(klMatch[1]), minutes: klMatch[2] ? Number(klMatch[2]) : 0 };
+    const hours = resolveSwedishConversationHour(Number(klMatch[1]), t);
+    return { hours, minutes: klMatch[2] ? Number(klMatch[2]) : 0 };
   }
 
   if (/^\d{1,2}$/.test(t.trim())) {
-    const hours = Number(t.trim());
+    const hours = resolveSwedishConversationHour(Number(t.trim()), t);
     if (hours > 23) return null;
     return { hours, minutes: 0 };
   }
 
   const bareMatch = t.match(/(?:^|\s)(\d{1,2})(?:[:.](\d{2}))?(?:\s|$)/);
   if (bareMatch && !/\d{1,2}\s*[-–]\s*\d{1,2}/.test(t)) {
-    const hours = Number(bareMatch[1]);
+    const hours = resolveSwedishConversationHour(Number(bareMatch[1]), t);
     const minutes = bareMatch[2] ? Number(bareMatch[2]) : 0;
     if (hours > 23 || minutes > 59) return null;
     return { hours, minutes };
@@ -253,63 +293,41 @@ function pad(n: number): string {
   return String(n).padStart(2, '0');
 }
 
-const HOUR_WORDS: Record<string, number> = {
-  noll: 0,
-  midnatt: 0,
-  en: 1,
-  ett: 1,
-  två: 2,
-  tva: 2,
-  tre: 3,
-  fyra: 4,
-  fyr: 4,
-  fem: 5,
-  sex: 6,
-  sju: 7,
-  sjua: 7,
-  åtta: 8,
-  atta: 8,
-  otta: 8,
-  nio: 9,
-  tio: 10,
-  elva: 11,
-  tolv: 12,
-};
-
-/** Parse "klockan nio", "kl 15", "15-16", "13" from Swedish text. */
 export function parseSwedishClockTime(raw: string): { hours: number; minutes: number; endHours?: number } | null {
   const t = raw.trim().toLowerCase().replace(/\s+/g, ' ');
 
   const rangeMatch = t.match(/\b(\d{1,2})\s*[-–]\s*(\d{1,2})\b/);
   if (rangeMatch) {
-    const hours = Number(rangeMatch[1]);
-    const endHours = Number(rangeMatch[2]);
+    const hours = resolveSwedishConversationHour(Number(rangeMatch[1]), t);
+    const endHours = resolveSwedishConversationHour(Number(rangeMatch[2]), t);
     if (hours > 23 || endHours > 23) return null;
     return { hours, minutes: 0, endHours };
   }
 
   const klWord = t.match(/\b(?:kl\.?|klockan)\s+([a-zåäö]+)\b/);
   if (klWord && HOUR_WORDS[klWord[1]] != null) {
-    return { hours: HOUR_WORDS[klWord[1]], minutes: 0 };
+    const hours = resolveSwedishConversationHour(HOUR_WORDS[klWord[1]], t);
+    return { hours, minutes: 0 };
   }
 
   const klDigit = t.match(/\b(?:kl\.?|klockan)\s*(\d{1,2})(?:[:.](\d{2}))?\b/);
   if (klDigit) {
+    const hours = resolveSwedishConversationHour(Number(klDigit[1]), t);
     return {
-      hours: Number(klDigit[1]),
+      hours,
       minutes: klDigit[2] ? Number(klDigit[2]) : 0,
     };
   }
 
   if (/^\d{1,2}$/.test(t.trim())) {
-    const hours = Number(t.trim());
+    const hours = resolveSwedishConversationHour(Number(t.trim()), t);
     if (hours > 23) return null;
     return { hours, minutes: 0 };
   }
 
   const bare = t.match(/(?:^|\s)(\d{1,2})(?:[:.](\d{2}))?(?:\s|$)/);
   if (bare && !/\d{1,2}\s*[-–]\s*\d{1,2}/.test(t)) {
-    const hours = Number(bare[1]);
+    const hours = resolveSwedishConversationHour(Number(bare[1]), t);
     const minutes = bare[2] ? Number(bare[2]) : 0;
     if (hours > 23 || minutes > 59) return null;
     return { hours, minutes };

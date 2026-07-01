@@ -8,11 +8,22 @@ function encodeBase64Url(str: string): string {
   return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
+function encodeMimeHeaderValue(value: string): string {
+  if (/^[\x20-\x7E]*$/.test(value)) return value;
+  const bytes = new TextEncoder().encode(value);
+  let binary = '';
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  return `=?UTF-8?B?${btoa(binary)}?=`;
+}
+
 function buildRawEmail(to: string, subject: string, body: string): string {
   return [
     `To: ${to}`,
-    `Subject: ${subject}`,
+    `Subject: ${encodeMimeHeaderValue(subject)}`,
     'Content-Type: text/plain; charset="UTF-8"',
+    'Content-Transfer-Encoding: 8bit',
     'MIME-Version: 1.0',
     '',
     body,
@@ -354,4 +365,104 @@ export function formatInboxForAgent(emails: InboxEmailSummary[]): string {
       return `${e.timeLabel}: ${e.from} — "${e.subject}"${unread}${preview}`;
     })
     .join('\n- ');
+}
+
+const JUNK_LIST_LIMIT = 500;
+
+/** Hämtar meddelande-ID för spam + gammal papperskorg. */
+export async function collectJunkMessageIds(accessToken: string): Promise<string[]> {
+  const [spamIds, trashIds] = await Promise.all([
+    listGmailMessageIds(accessToken, 'in:spam', JUNK_LIST_LIMIT),
+    listGmailMessageIds(accessToken, 'in:trash older_than:30d', JUNK_LIST_LIMIT),
+  ]);
+  return [...new Set([...spamIds, ...trashIds])];
+}
+
+export async function listGmailMessageIds(
+  accessToken: string,
+  query: string,
+  limit = JUNK_LIST_LIMIT,
+): Promise<string[]> {
+  const ids: string[] = [];
+  let pageToken: string | undefined;
+
+  while (ids.length < limit) {
+    const params = new URLSearchParams({
+      maxResults: String(Math.min(100, limit - ids.length)),
+      q: query,
+    });
+    if (pageToken) params.set('pageToken', pageToken);
+
+    const res = await fetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages?${params.toString()}`,
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+    );
+
+    if (res.status === 401) throw new Error('gmail_token_expired');
+    if (res.status === 403) throw new Error('gmail_modify_denied');
+    if (!res.ok) break;
+
+    const data = (await res.json()) as { messages?: { id: string }[]; nextPageToken?: string };
+    for (const message of data.messages ?? []) {
+      if (message.id) ids.push(message.id);
+    }
+    pageToken = data.nextPageToken;
+    if (!pageToken) break;
+  }
+
+  return ids;
+}
+
+export async function fetchMessageSubjects(
+  accessToken: string,
+  messageIds: string[],
+  max = 3,
+): Promise<string[]> {
+  const subjects: string[] = [];
+  for (const id of messageIds.slice(0, max)) {
+    try {
+      const res = await fetch(
+        `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=metadata&metadataHeaders=Subject`,
+        { headers: { Authorization: `Bearer ${accessToken}` } },
+      );
+      if (!res.ok) continue;
+      const data = (await res.json()) as GmailMessageMeta;
+      const subject = headerValue(data, 'Subject') || '(Inget ämne)';
+      subjects.push(subject.slice(0, 60));
+    } catch {
+      // skip
+    }
+  }
+  return subjects;
+}
+
+/** Permanent radering (tömmer spam/papperskorg). */
+export async function batchDeleteGmailMessages(
+  accessToken: string,
+  messageIds: string[],
+): Promise<number> {
+  if (!messageIds.length) return 0;
+
+  let deleted = 0;
+  for (let i = 0; i < messageIds.length; i += 1000) {
+    const chunk = messageIds.slice(i, i + 1000);
+    const res = await fetch(
+      'https://gmail.googleapis.com/gmail/v1/users/me/messages/batchDelete',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ ids: chunk }),
+      },
+    );
+
+    if (res.status === 401) throw new Error('gmail_token_expired');
+    if (res.status === 403) throw new Error('gmail_modify_denied');
+    if (!res.ok) throw new Error(`delete_failed_${res.status}`);
+    deleted += chunk.length;
+  }
+
+  return deleted;
 }

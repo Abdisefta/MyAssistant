@@ -8,7 +8,7 @@ import {
 import { markSentEmailCacheDirty } from '@/services/email-cache-events';
 import { ensureEmailSignature } from '@/services/email-signature';
 import { loadBossContact } from '@/services/boss-contact';
-import { findContactEmailByName, sendGmailMessage } from '@/services/gmail-api';
+import { findContactEmailByName, sendGmailMessage, batchDeleteGmailMessages, fetchMessageSubjects, listGmailMessageIds } from '@/services/gmail-api';
 import {
   createCalendarEvent,
   cancelCalendarEventsMatching,
@@ -30,7 +30,7 @@ import {
   syncBirthdayReminders,
 } from '@/services/birthday-reminders';
 import { parseSwedishBirthdayDate, parseSwedishClockTime, parseSwedishReminder } from '@/utils/parse-swedish-datetime';
-import type { PendingCalendarBooking, PendingEmailDraft, PendingSickDay } from '@/types/assistant';
+import type { PendingCalendarBooking, PendingEmailDraft, PendingJunkCleanup, PendingSickDay } from '@/types/assistant';
 import type { AgentTask, ConversationMessage, UserMemory } from '@/types/memory';
 
 export function looksLikeEmailRequest(text: string): boolean {
@@ -1108,16 +1108,28 @@ function parseSimpleTaskReminder(
   }
 
   if (!remindAt) {
+    const clock = parseSwedishClockTime(userMessage);
+    if (clock) {
+      remindAt = new Date(day);
+      remindAt.setHours(clock.hours, clock.minutes, 0, 0);
+    }
+  }
+
+  if (!remindAt) {
     const klMatch = t.match(/\b(?:kl|klockan)\s*(\d{1,2})(?:[:\.](\d{2}))?\b/);
     if (klMatch) {
       remindAt = new Date(day);
-      remindAt.setHours(Number(klMatch[1]), klMatch[2] ? Number(klMatch[2]) : 0, 0, 0);
-      taskText = taskText.replace(/\b(?:kl|klockan)\s*\d{1,2}(?:[:\.]\d{2})?\b/gi, '').trim();
+      const h = Number(klMatch[1]);
+      remindAt.setHours(h >= 1 && h <= 6 ? h + 12 : h, klMatch[2] ? Number(klMatch[2]) : 0, 0, 0);
     }
   }
 
   taskText = taskText
-    .replace(/\b(imorgon|idag|i kväll|ikväll|ikvall)\b/gi, '')
+    .replace(/\b(imorgon|idag|i kväll|ikväll|ikvall|övermorgon)\b/gi, '')
+    .replace(/\b(?:på\s+)?(måndag|mandag|tisdag|onsdag|torsdag|fredag|lördag|lordag|söndag|sondag)\b/gi, '')
+    .replace(/\b(?:kl\.?|klockan)\s*(?:\d{1,2}(?:[:.]\d{2})?|[a-zåäö]+)\b/gi, '')
+    .replace(/\brunt\b/gi, '')
+    .replace(/\batt\b/gi, '')
     .replace(/\s+/g, ' ')
     .trim();
 
@@ -1141,8 +1153,8 @@ export async function handleTaskReminderRequest(
   memory: UserMemory,
 ): Promise<{ reply: string; updatedMemory: UserMemory }> {
   const parsed =
-    (await parseTaskReminderRequest(userMessage, memory.name)) ??
-    parseSimpleTaskReminder(userMessage, memory.name);
+    parseSimpleTaskReminder(userMessage, memory.name) ??
+    (await parseTaskReminderRequest(userMessage, memory.name));
   if (!parsed) {
     throw new Error(
       'Jag förstod inte uppgiften. Prova: "Påminn mig handla mat imorgon efter jobbet."',
@@ -1499,6 +1511,77 @@ export async function executeSickDayAction(
 
   parts.push('Krya på dig!');
   return parts.join(' ');
+}
+
+export function looksLikeJunkCleanupRequest(text: string): boolean {
+  const t = normalizeSpeechText(text);
+  return (
+    /\b(rensa|radera|ta bort|töm|tom|städa|stada)\b.*\b(spam|skräp|skräpmail|skräpmejl|sopmail|sopmejl|reklam|skräppost|sop)\b/.test(
+      t,
+    ) ||
+    /\b(spam|skräpmail|skräpmejl|skräppost)\b.*\b(rensa|radera|ta bort|töm|tom)\b/.test(t) ||
+    /\brensa\s+(mail|mejl|inkorgen|gmail)\b/.test(t)
+  );
+}
+
+export async function prepareJunkCleanup(accessToken: string): Promise<PendingJunkCleanup> {
+  const [spamIds, trashIds] = await Promise.all([
+    listGmailMessageIds(accessToken, 'in:spam'),
+    listGmailMessageIds(accessToken, 'in:trash older_than:30d'),
+  ]);
+  const messageIds = [...new Set([...spamIds, ...trashIds])];
+  const sampleSubjects = await fetchMessageSubjects(accessToken, messageIds, 3);
+  return {
+    messageIds,
+    spamCount: spamIds.length,
+    trashCount: trashIds.length,
+    sampleSubjects,
+  };
+}
+
+export function buildJunkCleanupPreview(pending: PendingJunkCleanup): string {
+  const total = pending.messageIds.length;
+  if (total === 0) {
+    return 'Jag hittade inget skräpmail att radera — spam och gammal papperskorg är redan tomma.';
+  }
+
+  const parts: string[] = [];
+  if (pending.spamCount > 0) {
+    parts.push(`${pending.spamCount} i spam`);
+  }
+  if (pending.trashCount > 0) {
+    parts.push(`${pending.trashCount} i papperskorgen (äldre än 30 dagar)`);
+  }
+
+  const sample =
+    pending.sampleSubjects.length > 0
+      ? ` Exempel: ${pending.sampleSubjects.map((s) => `"${s}"`).join(', ')}.`
+      : '';
+
+  return `Jag hittade ${total} skräpmail (${parts.join(', ')}).${sample} Vill du att jag raderar dem permanent? Säg ja för att radera, eller avbryt.`;
+}
+
+export async function executeJunkCleanup(
+  pending: PendingJunkCleanup,
+  accessToken: string,
+): Promise<string> {
+  if (!pending.messageIds.length) {
+    return 'Inget att radera.';
+  }
+
+  try {
+    const deleted = await batchDeleteGmailMessages(accessToken, pending.messageIds);
+    return `Klart! Jag raderade ${deleted} skräpmail permanent (spam och gammal papperskorg).`;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '';
+    if (message.includes('gmail_modify_denied') || message.includes('403')) {
+      return 'Jag behöver ny Gmail-behörighet för att radera mail. Gå till Email → Koppla Google Mail igen och godkänn alla behörigheter.';
+    }
+    if (message.includes('gmail_token_expired')) {
+      return 'Gmail-inloggningen har gått ut. Koppla Google Mail igen under Email-fliken.';
+    }
+    return 'Kunde inte radera skräpmail just nu. Försök igen om en stund.';
+  }
 }
 
 export { formatDraftPreview };

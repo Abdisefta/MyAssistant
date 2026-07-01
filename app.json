@@ -2,7 +2,7 @@
     "expo":  {
                  "name":  "My Assistant",
                  "slug":  "MyAssistantFinal",
-                 "version":  "1.9.5",
+                 "version":  "1.9.6",
                  "orientation":  "portrait",
                  "icon":  "./assets/images/icon.png",
                  "scheme":  "myassistantfinal",
@@ -33,7 +33,7 @@
                                  "edgeToEdgeEnabled":  false,
                                  "predictiveBackGestureEnabled":  false,
                                  "usesCleartextTraffic":  true,
-                                 "versionCode":  41
+                                 "versionCode":  42
                              },
                  "web":  {
                              "output":  "static",

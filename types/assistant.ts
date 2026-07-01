@@ -18,6 +18,13 @@ export type PendingSickDay = {
   eventSummaries: string[];
 };
 
+export type PendingJunkCleanup = {
+  messageIds: string[];
+  spamCount: number;
+  trashCount: number;
+  sampleSubjects: string[];
+};
+
 export type EmailComposeResult = {
   subject: string;
   body: string;

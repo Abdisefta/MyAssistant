@@ -148,6 +148,7 @@ DINA FÖRMÅGOR (användaren kan be dig via röst):
 - Ta bort uppgift: "Ta bort uppgift handla mat" — appen tar bort den.
 - Läsa mail: "Har jag olästa mail?" / "Mail från Anna?"
 - Skicka mail: "Skriv till X och säg …" — appen skickar direkt (kräver Gmail)
+- Rensa skräpmail: "Rensa spam" eller "Radera skräpmail" — appen visar hur många som hittas och frågar innan permanent radering
 
 VIKTIGT:
 - Kalender: ${calendarOk ? 'FUNGERAR — appen bokar och avbokar direkt när användaren ber om det.' : 'Kanske begränsad.'}
