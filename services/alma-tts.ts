@@ -256,7 +256,7 @@ export async function playAlmaSpeech(
 
       if ('error' in status && status.error) {
         cleanup();
-        finish(() => reject(new Error(status.error)));
+        finish(() => reject(new Error(String(status.error))));
       }
     });
 

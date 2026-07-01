@@ -286,10 +286,16 @@ export async function parseEmailRequest(
   const prompt = `Analysera användarens önskan att skicka e-post.
 Returnera endast JSON: {"recipientName":"...","messageIntent":"..."}
 
-recipientName = mottagarens namn ELLER full e-postadress om angiven
-messageIntent = kort vad mailet ska säga
+recipientName = mottagarens namn (INTE e-postadress om bara namn anges) ELLER full e-postadress om uttryckligen angiven
+messageIntent = kort vad mailet ska säga — BARA budskapet, aldrig mottagarens namn eller kommandon som "skicka mail till"
+
+Regler:
+- Separera namn från budskap även utan "att"/"säg", t.ex. "till Karlssonellinor95 jag blir sen" → recipientName "Karlssonellinor95", messageIntent "jag blir sen"
+- Ta bort siffror i slutet av namn om de verkar vara tal (95) — spara namnet utan siffror om möjligt
+- messageIntent ska vara naturligt svenska, t.ex. "jag blir lite sen till mötet idag"
 
 Exempel: "Skriv till Magnus och säg att jag kommer sent" → {"recipientName":"Magnus","messageIntent":"jag kommer sent"}
+Exempel: "Skicka mail till Karlssonellinor95 jag blir lite sen idag till mötet" → {"recipientName":"Karlssonellinor95","messageIntent":"jag blir lite sen idag till mötet"}
 Exempel: "Skicka hej till ellinora@mail.com" → {"recipientName":"ellinora@mail.com","messageIntent":"hej"}
 
 Användare: "${userMessage}"`;
@@ -313,40 +319,91 @@ Användare: "${userMessage}"`;
   }
 }
 
+function recipientFirstName(displayName: string): string {
+  const cleaned = displayName.replace(/<[^>]+>/, '').trim();
+  const parts = cleaned.split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return displayName;
+  if (parts.length === 1) return parts[0];
+  const lastIsInitial = parts[parts.length - 1].length <= 2;
+  return lastIsInitial ? parts[0] : parts[parts.length - 1];
+}
+
 export async function composeEmailFromRequest(
-  recipientName: string,
+  recipientDisplayName: string,
   messageIntent: string,
   senderName: string,
-  originalRequest: string,
+  senderJob?: string,
 ): Promise<{ subject: string; body: string }> {
-  const prompt = `Skriv ett kort professionellt mejl på svenska.
+  const greetingName = recipientFirstName(recipientDisplayName);
+  const jobLine = senderJob?.trim() ? `\n- Avsändarens titel/roll: ${senderJob.trim()}` : '';
+  const prompt = `Skriv ett kort professionellt affärsmejl på svenska.
 Returnera endast JSON: {"subject":"...","body":"..."}
 
-Från: ${senderName || 'Användaren'}
-Till: ${recipientName}
-Budskap: ${messageIntent}
-Original önskemål: ${originalRequest}
+Från: ${senderName || 'Avsändaren'}${jobLine}
+Till: ${recipientDisplayName}
+Förnamn för hälsning: ${greetingName}
+Budskap (intent): ${messageIntent}
 
 Regler:
-- subject: kort och tydligt
-- body: 2-5 meningar, vänlig ton, signera med avsändarens namn
+- subject: kort, tydlig och affärsmässig (t.ex. "Sen ankomst till mötet", "Bekräftelse — möte imorgon") — aldrig bara "Meddelande"
+- body: 2–5 meningar, artig och professionell svensk affärston (du-form till kollegor, neutralt och tydligt)
+- börja med "Hej ${greetingName}," (eller liknande naturlig hälsning)
+- omvandla budskapet till korrekt svenska — skriv INTE om röstkommandon eller e-postadresser
+- avsluta med "Med vänlig hälsning," följt av avsändarens namn${senderJob?.trim() ? ` och titel "${senderJob.trim()}" på egen rad` : ''}
 - inga markdown-block`;
 
   const raw = await callGemini(
-    'Svara endast med JSON.',
+    'Svara endast med JSON. Skriv ett färdigt mejl — kopiera inte användarens röstkommando ordagrant.',
     [{ role: 'user', parts: [{ text: prompt }] }],
   );
   const parsed = parseJsonFromGemini<{ subject?: string; body?: string }>(raw);
   if (!parsed?.body?.trim()) {
+    const fallbackBody = [
+      `Hej ${greetingName},`,
+      '',
+      polishMessageIntent(messageIntent),
+      '',
+      'Med vänlig hälsning,',
+      senderName || '',
+      senderJob?.trim() || '',
+    ]
+      .filter(Boolean)
+      .join('\n');
     return {
-      subject: 'Meddelande',
-      body: `Hej ${recipientName},\n\n${messageIntent}\n\nVänliga hälsningar,\n${senderName || ''}`.trim(),
+      subject: inferSubjectFromIntent(messageIntent),
+      body: fallbackBody.trim(),
     };
   }
   return {
-    subject: parsed.subject?.trim() || 'Meddelande',
+    subject: parsed.subject?.trim() || inferSubjectFromIntent(messageIntent),
     body: parsed.body.trim(),
   };
+}
+
+function polishMessageIntent(intent: string): string {
+  let text = intent.trim();
+  text = text.replace(/^(att|och|säg|skriv)\s+/i, '');
+  if (/^jag\b/i.test(text)) {
+    text = text.charAt(0).toUpperCase() + text.slice(1);
+  }
+  if (!/[.!?]$/.test(text)) text += '.';
+  return text;
+}
+
+function inferSubjectFromIntent(intent: string): string {
+  const lower = intent.toLowerCase();
+  if (/\b(sen|försenad|försening|blir sen|kommer sent)\b/.test(lower)) return 'Sen ankomst';
+  if (/\b(möte|mötet|mötes)\b/.test(lower) && /\b(bekräft|boka|imorgon|idag)\b/.test(lower)) {
+    return 'Bekräftelse — möte';
+  }
+  if (/\b(möte|mötet)\b/.test(lower)) return 'Angående mötet';
+  if (/\b(sjuk|frånvaro|ledig|hemma)\b/.test(lower)) return 'Frånvaro';
+  if (/\b(tack|tackar|thanks)\b/.test(lower)) return 'Tack';
+  if (/\b(förslag|idé|förtydlig)\b/.test(lower)) return 'Angående förslag';
+  if (/\b(status|uppdatering|rapport)\b/.test(lower)) return 'Statusuppdatering';
+  const snippet = intent.trim().slice(0, 48);
+  if (snippet.length >= 8) return snippet.charAt(0).toUpperCase() + snippet.slice(1);
+  return 'Angående meddelande';
 }
 
 function todayContext(): string {

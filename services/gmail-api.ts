@@ -27,10 +27,157 @@ function extractEmailAddress(raw: string): string | null {
   return null;
 }
 
+function stripTrailingNumbers(raw: string): string {
+  return raw.trim().replace(/\d+\s*$/, '').trim();
+}
+
+function capitalizeWord(word: string): string {
+  if (!word) return word;
+  return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+}
+
+function splitConcatenatedName(raw: string): string[] {
+  const stripped = stripTrailingNumbers(raw).replace(/\s+/g, ' ');
+  if (!stripped) return [];
+
+  const results = new Set<string>([stripped, stripped.toLowerCase()]);
+
+  const spaceParts = stripped.split(/\s+/).filter(Boolean);
+  if (spaceParts.length >= 2) {
+    results.add(spaceParts.join(' '));
+    results.add(`${spaceParts[spaceParts.length - 1]} ${spaceParts[0]}`);
+    for (const part of spaceParts) {
+      if (part.length > 2) {
+        results.add(part);
+        results.add(part.toLowerCase());
+      }
+    }
+  }
+
+  const camelParts = stripped.split(/(?=[A-ZÅÄÖ])/).filter(Boolean);
+  if (camelParts.length >= 2) {
+    const joined = camelParts.map(capitalizeWord).join(' ');
+    results.add(joined);
+    results.add(joined.toLowerCase());
+    for (const part of camelParts) {
+      if (part.length > 2) {
+        results.add(capitalizeWord(part));
+        results.add(part.toLowerCase());
+      }
+    }
+  }
+
+  if (!/\s/.test(stripped) && stripped.length > 6) {
+    const lower = stripped.toLowerCase();
+    const surnameEndings = ['sson', 'ström', 'strom', 'berg', 'qvist', 'lund', 'gren', 'stedt', 'holm', 'ström'];
+    for (const ending of surnameEndings) {
+      const idx = lower.indexOf(ending);
+      if (idx > 2 && idx + ending.length < lower.length) {
+        const first = capitalizeWord(stripped.slice(0, idx + ending.length));
+        const second = capitalizeWord(stripped.slice(idx + ending.length));
+        if (second.length >= 3) {
+          results.add(`${first} ${second}`);
+          results.add(`${second} ${first}`);
+          results.add(first);
+          results.add(second);
+          results.add(first.toLowerCase());
+          results.add(second.toLowerCase());
+        }
+      }
+    }
+  }
+
+  return [...results].filter((v) => v.length > 1);
+}
+
 function nameMatchesHeader(name: string, headerValue: string): boolean {
-  const needle = name.trim().toLowerCase();
+  const hay = headerValue.toLowerCase();
+  const needle = stripTrailingNumbers(name).toLowerCase();
   if (!needle) return false;
-  return headerValue.toLowerCase().includes(needle);
+  if (hay.includes(needle)) return true;
+
+  for (const variant of splitConcatenatedName(name)) {
+    const v = variant.toLowerCase();
+    if (v.length > 2 && hay.includes(v)) return true;
+  }
+
+  const parts = needle.split(/\s+/).filter((p) => p.length > 1);
+  if (parts.length >= 2) {
+    return parts.every((part) => hay.includes(part));
+  }
+
+  const splitParts = splitConcatenatedName(name);
+  if (splitParts.length >= 2) {
+    const meaningful = splitParts.filter((p) => p.length > 2 && p.includes(' '));
+    for (const combo of meaningful) {
+      const comboParts = combo.toLowerCase().split(/\s+/).filter((p) => p.length > 2);
+      if (comboParts.length >= 2 && comboParts.every((part) => hay.includes(part))) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+export function contactNameVariants(raw: string): string[] {
+  const cleaned = stripTrailingNumbers(raw).replace(/\s+/g, ' ');
+  if (!cleaned) return [];
+
+  const variants = new Set<string>();
+  for (const variant of splitConcatenatedName(cleaned)) {
+    variants.add(variant);
+    variants.add(stripTrailingNumbers(variant));
+  }
+
+  return [...variants].filter((v) => v.length > 1);
+}
+
+async function searchContactByQuery(
+  accessToken: string,
+  searchName: string,
+): Promise<{ email: string; displayName: string; score: number } | null> {
+  const query = encodeURIComponent(`from:"${searchName}" OR to:"${searchName}"`);
+  const listRes = await fetch(
+    `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${query}&maxResults=15`,
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+  );
+
+  if (!listRes.ok) return null;
+
+  const listData = (await listRes.json()) as { messages?: { id: string }[] };
+  const ids = listData.messages?.map((m) => m.id) ?? [];
+  if (!ids.length) return null;
+
+  const counts = new Map<string, { email: string; displayName: string; score: number }>();
+
+  for (const id of ids.slice(0, 10)) {
+    const msgRes = await fetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=metadata&metadataHeaders=From&metadataHeaders=To`,
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+    );
+    if (!msgRes.ok) continue;
+
+    const msg = (await msgRes.json()) as GmailMessageMeta;
+    for (const headerName of ['From', 'To'] as const) {
+      const value = headerValue(msg, headerName);
+      if (!nameMatchesHeader(searchName, value)) continue;
+
+      const email = extractEmailAddress(value);
+      if (!email) continue;
+
+      const existing = counts.get(email);
+      const displayName = value.replace(/<[^>]+>/, '').trim() || searchName;
+      counts.set(email, {
+        email,
+        displayName,
+        score: (existing?.score ?? 0) + 1,
+      });
+    }
+  }
+
+  const best = [...counts.values()].sort((a, b) => b.score - a.score)[0];
+  return best ?? null;
 }
 
 export type InboxEmailSummary = {
@@ -99,46 +246,15 @@ export async function findContactEmailByName(
     return { email: trimmed.toLowerCase(), displayName: trimmed };
   }
 
-  const query = encodeURIComponent(`from:${trimmed} OR to:${trimmed}`);
-  const listRes = await fetch(
-    `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${query}&maxResults=15`,
-    { headers: { Authorization: `Bearer ${accessToken}` } },
-  );
+  let best: { email: string; displayName: string; score: number } | null = null;
 
-  if (!listRes.ok) return null;
-
-  const listData = (await listRes.json()) as { messages?: { id: string }[] };
-  const ids = listData.messages?.map((m) => m.id) ?? [];
-  if (!ids.length) return null;
-
-  const counts = new Map<string, { email: string; displayName: string; score: number }>();
-
-  for (const id of ids.slice(0, 10)) {
-    const msgRes = await fetch(
-      `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=metadata&metadataHeaders=From&metadataHeaders=To`,
-      { headers: { Authorization: `Bearer ${accessToken}` } },
-    );
-    if (!msgRes.ok) continue;
-
-    const msg = (await msgRes.json()) as GmailMessageMeta;
-    for (const headerName of ['From', 'To'] as const) {
-      const value = headerValue(msg, headerName);
-      if (!nameMatchesHeader(trimmed, value)) continue;
-
-      const email = extractEmailAddress(value);
-      if (!email) continue;
-
-      const existing = counts.get(email);
-      const displayName = value.replace(/<[^>]+>/, '').trim() || trimmed;
-      counts.set(email, {
-        email,
-        displayName,
-        score: (existing?.score ?? 0) + 1,
-      });
+  for (const variant of contactNameVariants(trimmed)) {
+    const found = await searchContactByQuery(accessToken, variant);
+    if (found && (!best || found.score > best.score)) {
+      best = found;
     }
   }
 
-  const best = [...counts.values()].sort((a, b) => b.score - a.score)[0];
   return best ? { email: best.email, displayName: best.displayName } : null;
 }
 

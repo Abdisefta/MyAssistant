@@ -68,10 +68,7 @@ function shouldAutoConfirmCalendarBooking(text) {
 }
 
 function shouldAutoSendEmail(text) {
-  const t = normalizeSpeechText(text);
-  if (!looksLikeEmailRequest(text)) return false;
-  if (!/\b(skicka|send|maila|mejla)\b/.test(t)) return false;
-  return /[^\s@]+@[^\s@]+\.[^\s@]+/.test(t) || /\b(säg|skriv|att|meddelande|hej)\b/.test(t);
+  return false;
 }
 
 function parseSimpleEmailRequest(userMessage) {
@@ -86,14 +83,37 @@ function parseSimpleEmailRequest(userMessage) {
       'Hej';
     return { recipientName: directEmail[1], messageIntent: intent };
   }
-  const namedRecipient = t.match(
-    /(?:skriv|maila|mejla|skicka)\s+(?:ett\s+)?(?:mail|mejl|e-?post)?\s*till\s+([a-zåäöéüA-ZÅÄÖÉÜ][\wåäöéüÅÄÖÉÜ\s-]{1,40})/i,
+
+  const emailVerbMatch = t.match(
+    /(?:skriv|maila|mejla|skicka)\s+(?:ett\s+)?(?:mail|mejl|e-?post)?\s*till\s+(.+)/i,
   );
-  if (namedRecipient) {
-    const name = namedRecipient[1].replace(/\b(?:och|säg|skriv|att)\b.*$/i, '').trim();
-    const intent = t.match(/\b(?:och\s+)?(?:säg|skriv|att)\s+(.+)$/i)?.[1]?.trim() || 'Hej';
-    if (name) return { recipientName: name, messageIntent: intent };
+  if (!emailVerbMatch) return null;
+
+  let remainder = emailVerbMatch[1].trim();
+  const intentAfterKeyword = remainder.match(/\b(?:och\s+)?(?:säg|skriv)\s+(?:att\s+)?(.+)$/i);
+  if (intentAfterKeyword?.index !== undefined) {
+    const intent = intentAfterKeyword[1].trim();
+    const name = remainder.slice(0, intentAfterKeyword.index).trim();
+    if (name && intent) return { recipientName: name, messageIntent: intent };
   }
+
+  const jagSplit = remainder.match(
+    /^([A-Za-zÅÄÖåäöéü0-9][A-Za-zÅÄÖåäöéü0-9-]*(?:\s+[A-Za-zÅÄÖåäöéü][A-Za-zÅÄÖåäöéü0-9-]*)*)\s+(jag\s.+)$/i,
+  );
+  if (jagSplit) {
+    return { recipientName: jagSplit[1].trim(), messageIntent: jagSplit[2].trim() };
+  }
+
+  const attSplit = remainder.match(
+    /^([A-Za-zÅÄÖåäöéü0-9][A-Za-zÅÄÖåäöéü0-9-]*(?:\s+[A-Za-zÅÄÖåäöéü][A-Za-zÅÄÖåäöéü0-9-]*)*)\s+(att\s.+)$/i,
+  );
+  if (attSplit) {
+    return {
+      recipientName: attSplit[1].trim(),
+      messageIntent: attSplit[2].replace(/^att\s+/i, '').trim(),
+    };
+  }
+
   return null;
 }
 
@@ -147,7 +167,17 @@ const tests = [
   {
     name: 'email auto send with address',
     input: 'skicka mail till test@example.com och säg hej',
-    expect: { isEmail: true, autoSend: true, recipient: 'test@example.com' },
+    expect: { isEmail: true, autoSend: false, recipient: 'test@example.com' },
+  },
+  {
+    name: 'email concatenated name + jag intent',
+    input: 'skicka mail till Karlssonellinor95 jag blir lite sen idag till mötet',
+    expect: {
+      isEmail: true,
+      autoSend: false,
+      recipient: 'Karlssonellinor95',
+      messageIntent: 'jag blir lite sen idag till mötet',
+    },
   },
   {
     name: 'booking not confused with email',
@@ -202,6 +232,10 @@ for (const test of tests) {
     const r = emailParsed?.recipientName;
     if (r !== test.expect.recipient) errors.push(`recipient: got ${r}, want ${test.expect.recipient}`);
   }
+  if (test.expect.messageIntent !== undefined) {
+    const m = emailParsed?.messageIntent;
+    if (m !== test.expect.messageIntent) errors.push(`messageIntent: got ${m}, want ${test.expect.messageIntent}`);
+  }
 
   if (errors.length === 0) {
     console.log(`PASS: ${test.name}`);
@@ -213,10 +247,10 @@ for (const test of tests) {
   }
 }
 
-// Firebase config sanity
+// Firebase config sanity (generated at build from .env)
 const fs = await import('fs');
-const firebaseTs = fs.readFileSync('constants/firebase.ts', 'utf8');
-const apiKeyMatch = firebaseTs.match(/apiKey:\s*'([^']+)'/);
+const firebaseGenerated = fs.readFileSync('constants/firebase.generated.ts', 'utf8');
+const apiKeyMatch = firebaseGenerated.match(/apiKey:\s*'([^']+)'/);
 if (apiKeyMatch?.[1]?.startsWith('AIzaSy') && apiKeyMatch[1].length > 30) {
   console.log('PASS: Firebase apiKey format looks valid');
   passed++;
@@ -225,9 +259,12 @@ if (apiKeyMatch?.[1]?.startsWith('AIzaSy') && apiKeyMatch[1].length > 30) {
   failed++;
 }
 
-// Voice hook wired
-const voiceTs = fs.readFileSync('hooks/use-voice-input.ts', 'utf8');
-if (voiceTs.includes('ExpoSpeechRecognitionModule.start') && voiceTs.includes('sv-SE')) {
+// Voice hook wired (native build — expo-speech-recognition)
+const voiceNative = fs.readFileSync('hooks/use-voice-input.native.ts', 'utf8');
+if (
+  voiceNative.includes('ExpoSpeechRecognitionModule.start') &&
+  (voiceNative.includes('getSpeechLocale') || voiceNative.includes('sv-SE'))
+) {
   console.log('PASS: Voice input uses expo-speech-recognition');
   passed++;
 } else {

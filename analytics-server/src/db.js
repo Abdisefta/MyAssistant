@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import { createHash } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -49,6 +50,13 @@ db.exec(`
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS trial_emails (
+    email TEXT PRIMARY KEY,
+    first_trial_at INTEGER NOT NULL,
+    device_id TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_trial_emails_device ON trial_emails(device_id);
 `);
 
 function ensureDeviceColumn(name, type = 'TEXT') {
@@ -60,6 +68,85 @@ function ensureDeviceColumn(name, type = 'TEXT') {
 ensureDeviceColumn('country');
 ensureDeviceColumn('locale');
 ensureDeviceColumn('timezone');
+ensureDeviceColumn('blocked', 'INTEGER NOT NULL DEFAULT 0');
+ensureDeviceColumn('blocked_at', 'INTEGER');
+ensureDeviceColumn('blocked_reason', 'TEXT');
+ensureDeviceColumn('free_forever', 'INTEGER NOT NULL DEFAULT 0');
+ensureDeviceColumn('free_forever_note', 'TEXT');
+ensureDeviceColumn('trial_email_hash', 'TEXT');
+ensureDeviceColumn('user_uid', 'TEXT');
+
+const TRIAL_DAYS = 60;
+
+function hashEmail(email) {
+  const normalized = String(email ?? '')
+    .trim()
+    .toLowerCase();
+  if (!normalized) return null;
+  return createHash('sha256').update(normalized).digest('hex');
+}
+
+export function isDeviceFreeForever(deviceId) {
+  const row = db.prepare('SELECT free_forever FROM devices WHERE device_id = ?').get(deviceId);
+  return Boolean(row?.free_forever);
+}
+
+export function setDeviceFreeForever(deviceId, enabled, note = null) {
+  const existing = db.prepare('SELECT device_id FROM devices WHERE device_id = ?').get(deviceId);
+  if (!existing) return null;
+  db.prepare(
+    'UPDATE devices SET free_forever = ?, free_forever_note = ? WHERE device_id = ?',
+  ).run(enabled ? 1 : 0, enabled && note?.trim() ? note.trim() : null, deviceId);
+  return getDeviceDetail(deviceId);
+}
+
+export function registerTrialEmail(email, deviceId, uid = null) {
+  const hashed = hashEmail(email);
+  if (!hashed) return { ok: false, error: 'email required' };
+  const deviceRow = deviceId
+    ? db.prepare('SELECT first_seen FROM devices WHERE device_id = ?').get(deviceId)
+    : null;
+  const ts = deviceRow?.first_seen ?? Date.now();
+  const existing = db.prepare('SELECT first_trial_at FROM trial_emails WHERE email = ?').get(hashed);
+  if (!existing) {
+    db.prepare(
+      'INSERT INTO trial_emails (email, first_trial_at, device_id) VALUES (?, ?, ?)',
+    ).run(hashed, ts, deviceId ?? null);
+  } else if (deviceId) {
+    db.prepare('UPDATE trial_emails SET device_id = COALESCE(device_id, ?) WHERE email = ?').run(
+      deviceId,
+      hashed,
+    );
+  }
+  if (deviceId) {
+    db.prepare('UPDATE devices SET trial_email_hash = ?, user_uid = COALESCE(?, user_uid) WHERE device_id = ?').run(
+      hashed,
+      uid ?? null,
+      deviceId,
+    );
+  }
+  return {
+    ok: true,
+    emailHash: hashed,
+    firstTrialAt: existing?.first_trial_at ?? ts,
+    eligible: hasTrialEligible(email),
+  };
+}
+
+export function hasTrialEligible(email) {
+  const hashed = hashEmail(email);
+  if (!hashed) return true;
+  const row = db.prepare('SELECT first_trial_at FROM trial_emails WHERE email = ?').get(hashed);
+  if (!row) return true;
+  const day = 24 * 60 * 60 * 1000;
+  return Date.now() - row.first_trial_at < TRIAL_DAYS * day;
+}
+
+function getEmailTrialStart(emailHash) {
+  if (!emailHash) return null;
+  const row = db.prepare('SELECT first_trial_at FROM trial_emails WHERE email = ?').get(emailHash);
+  return row?.first_trial_at ?? null;
+}
 
 /**
  * Kostantaganden per händelse (SEK) — används för budgetgräns per enhet.
@@ -77,15 +164,16 @@ ensureDeviceColumn('timezone');
  * Fast Hetzner (TTS + analytics) dras av separat i dashboardens utgiftslista.
  */
 const DEFAULT_LIMITS = {
-  limit_chats_day: Number(process.env.LIMIT_CHATS_DAY ?? 15),
-  limit_gemini_day: Number(process.env.LIMIT_GEMINI_DAY ?? 15),
-  limit_tts_day: Number(process.env.LIMIT_TTS_DAY ?? 20),
-  limit_chats_month: Number(process.env.LIMIT_CHATS_MONTH ?? 400),
-  limit_gemini_month: Number(process.env.LIMIT_GEMINI_MONTH ?? 400),
-  limit_tts_month: Number(process.env.LIMIT_TTS_MONTH ?? 500),
+  limit_chats_day: Number(process.env.LIMIT_CHATS_DAY ?? 99999),
+  limit_gemini_day: Number(process.env.LIMIT_GEMINI_DAY ?? 99999),
+  limit_tts_day: Number(process.env.LIMIT_TTS_DAY ?? 99999),
+  limit_chats_month: Number(process.env.LIMIT_CHATS_MONTH ?? 99999),
+  limit_gemini_month: Number(process.env.LIMIT_GEMINI_MONTH ?? 99999),
+  limit_tts_month: Number(process.env.LIMIT_TTS_MONTH ?? 99999),
   monthly_budget_sek: Number(process.env.MONTHLY_BUDGET_SEK ?? 35),
   cost_gemini_sek: Number(process.env.COST_GEMINI_SEK ?? 0.06),
   cost_tts_sek: Number(process.env.COST_TTS_SEK ?? 0.002),
+  budget_warning_pct: Number(process.env.BUDGET_WARNING_PCT ?? 80),
 };
 
 const LIMIT_TYPE_CONFIG = {
@@ -207,6 +295,42 @@ export function getDeviceEstimatedCostMonth(deviceId) {
   return gemini * limits.costGeminiSek + tts * limits.costTtsSek;
 }
 
+export function isDeviceBlocked(deviceId) {
+  const row = db.prepare('SELECT blocked FROM devices WHERE device_id = ?').get(deviceId);
+  return Boolean(row?.blocked);
+}
+
+export function blockDevice(deviceId, reason = 'Missbruk') {
+  const existing = db.prepare('SELECT device_id FROM devices WHERE device_id = ?').get(deviceId);
+  if (!existing) return null;
+  const ts = Date.now();
+  db.prepare(
+    'UPDATE devices SET blocked = 1, blocked_at = ?, blocked_reason = ? WHERE device_id = ?',
+  ).run(ts, reason?.trim() || 'Missbruk', deviceId);
+  return getDeviceDetail(deviceId);
+}
+
+export function unblockDevice(deviceId) {
+  const existing = db.prepare('SELECT device_id FROM devices WHERE device_id = ?').get(deviceId);
+  if (!existing) return null;
+  db.prepare(
+    'UPDATE devices SET blocked = 0, blocked_at = NULL, blocked_reason = NULL WHERE device_id = ?',
+  ).run(deviceId);
+  return getDeviceDetail(deviceId);
+}
+
+/** Raderar enhet och all tillhörande statistik (ej ångras). */
+export function deleteDevice(deviceId) {
+  const existing = db.prepare('SELECT device_id FROM devices WHERE device_id = ?').get(deviceId);
+  if (!existing) return false;
+  db.prepare('DELETE FROM events WHERE device_id = ?').run(deviceId);
+  db.prepare('DELETE FROM devices WHERE device_id = ?').run(deviceId);
+  return true;
+}
+
+const BLOCKED_MESSAGE =
+  'Ditt konto är tillfälligt spärrat. Kontakta support om du tror att detta är ett misstag.';
+
 function eventCost(type, limits) {
   const cfg = LIMIT_TYPE_CONFIG[type];
   if (!cfg?.costKey) return 0;
@@ -218,64 +342,86 @@ export function checkUsageLimit(deviceId, type) {
   if (!cfg) {
     return { allowed: true, used: 0, limit: 0, type };
   }
+
+  if (isDeviceBlocked(deviceId)) {
+    return {
+      allowed: false,
+      used: 0,
+      limit: 0,
+      type,
+      period: 'blocked',
+      message: BLOCKED_MESSAGE,
+    };
+  }
+
   const limits = getUsageLimits();
-  const usedDay = getDeviceUsageToday(deviceId, type);
-  const usedMonth = getDeviceUsageMonth(deviceId, type);
-  const dayLimitMap = {
-    limit_chats_day: limits.chatsPerDay,
-    limit_gemini_day: limits.geminiPerDay,
-    limit_tts_day: limits.ttsPerDay,
-  };
-  const monthLimitMap = {
-    limit_chats_month: limits.chatsPerMonth,
-    limit_gemini_month: limits.geminiPerMonth,
-    limit_tts_month: limits.ttsPerMonth,
-  };
-  const dayCap = dayLimitMap[cfg.dayKey];
-  const monthCap = monthLimitMap[cfg.monthKey];
   const costMonth = getDeviceEstimatedCostMonth(deviceId);
   const nextCost = eventCost(type, limits);
   const budget = limits.monthlyBudgetSek;
+  const freeForever = isDeviceFreeForever(deviceId);
 
-  if (usedDay >= dayCap) {
-    return {
-      allowed: false,
-      used: usedDay,
-      limit: dayCap,
-      type,
-      period: 'day',
-      message: 'Du har nått dagens gräns. Försök igen imorgon.',
-    };
-  }
-  if (usedMonth >= monthCap) {
-    return {
-      allowed: false,
-      used: usedMonth,
-      limit: monthCap,
-      type,
-      period: 'month',
-      message: 'Du har nått månadens gräns. Försök igen nästa månad.',
-    };
-  }
-  if (costMonth + nextCost > budget) {
+  // 35 kr gäller alla — även "gratis för alltid" (gratis = inget abonnemang, inte obegränsad API).
+  if (nextCost > 0 && costMonth + nextCost > budget) {
     return {
       allowed: false,
       used: Math.round(costMonth * 100) / 100,
       limit: budget,
       type,
       period: 'budget',
-      message: 'Månadens kostnadsgräns är nådd. Försök igen nästa månad.',
+      message: freeForever
+        ? 'Du har nått månadens användningsgräns (35 kr). Assistenten pausas till nästa månad.'
+        : 'Du har nått månadens kostnadsgräns (35 kr). Köp ett nytt paket för att fortsätta använda assistenten.',
     };
   }
   return {
     allowed: true,
-    used: usedDay,
-    limit: dayCap,
-    usedMonth,
-    monthLimit: monthCap,
+    used: Math.round(costMonth * 100) / 100,
+    limit: budget,
     costMonth: Math.round(costMonth * 100) / 100,
     budget,
     type,
+  };
+}
+
+/** Varning när kunden närmar sig budgettaket (t.ex. 80 % av 35 kr). */
+export function getBudgetStatus(deviceId) {
+  if (isDeviceBlocked(deviceId)) {
+    return {
+      costMonth: 0,
+      budget: getUsageLimits().monthlyBudgetSek,
+      percent: 100,
+      level: 'blocked',
+      message: BLOCKED_MESSAGE,
+    };
+  }
+  const limits = getUsageLimits();
+  const costMonth = getDeviceEstimatedCostMonth(deviceId);
+  const budget = limits.monthlyBudgetSek;
+  const freeForever = isDeviceFreeForever(deviceId);
+  const warningPct = getSetting('budget_warning_pct', DEFAULT_LIMITS.budget_warning_pct);
+  const percent = budget > 0 ? Math.round((costMonth / budget) * 100) : 0;
+  const warningThreshold = (budget * warningPct) / 100;
+
+  let level = 'ok';
+  let message = null;
+  if (costMonth >= budget) {
+    level = 'exceeded';
+    message = freeForever
+      ? 'Du har nått månadens användningsgräns (35 kr). Assistenten pausas till nästa månad.'
+      : 'Du har nått månadens kostnadsgräns (35 kr). Köp ett nytt paket för att fortsätta.';
+  } else if (costMonth >= warningThreshold) {
+    level = 'warning';
+    message = freeForever
+      ? `Du har använt ${Math.round(costMonth)} av ${budget} kr denna månad. Assistenten pausas om gränsen nås.`
+      : `Du har använt ${Math.round(costMonth)} av ${budget} kr denna månad. Köp nytt paket snart så assistenten inte pausas.`;
+  }
+
+  return {
+    costMonth: Math.round(costMonth * 100) / 100,
+    budget,
+    percent,
+    level,
+    message,
   };
 }
 
@@ -478,6 +624,7 @@ export function getOverview() {
     charts: {
       installs: installChart,
       opens: opensChart,
+      growth: getGrowthStats().months,
     },
     versions: versionRows,
     platforms: platformRows,
@@ -508,7 +655,6 @@ export function getOverview() {
 
 const EVENT_TYPES = ['app_open', 'assistant_message', 'gemini_request', 'tts_request', 'install'];
 
-const TRIAL_DAYS = 60;
 const ACTIVE_WINDOW_DAYS = 30;
 const VAT_RATE = 0.25;
 
@@ -516,18 +662,32 @@ function roundSek(n) {
   return Math.round(n * 100) / 100;
 }
 
-function deviceFinanceStatus(firstSeen, lastSeen, now) {
+function deviceFinanceStatus(firstSeen, lastSeen, now, options = {}) {
+  const { freeForever = false, emailTrialEligible = true, emailTrialStart = null } = options;
   const day = 24 * 60 * 60 * 1000;
   const trialMs = TRIAL_DAYS * day;
   const activeSince = now - ACTIVE_WINDOW_DAYS * day;
   const isActive = lastSeen >= activeSince;
-  const isPastTrial = now - firstSeen >= trialMs;
+
+  if (freeForever) {
+    return {
+      status: 'free_forever',
+      isActive,
+      isPaying: false,
+      trialDaysLeft: 0,
+    };
+  }
+
+  const trialStart =
+    emailTrialStart != null ? Math.min(firstSeen, emailTrialStart) : firstSeen;
+  const isPastTrial = !emailTrialEligible || now - trialStart >= trialMs;
+
   if (!isPastTrial) {
     return {
       status: isActive ? 'trial' : 'trial_inactive',
       isActive,
       isPaying: false,
-      trialDaysLeft: Math.max(0, Math.ceil((trialMs - (now - firstSeen)) / day)),
+      trialDaysLeft: Math.max(0, Math.ceil((trialMs - (now - trialStart)) / day)),
     };
   }
   return {
@@ -585,7 +745,8 @@ export function getFinanceOverview() {
 
   const allDevices = db
     .prepare(
-      `SELECT device_id, first_seen, last_seen, app_version, platform, opens, country, locale
+      `SELECT device_id, first_seen, last_seen, app_version, platform, opens, country, locale, blocked,
+              free_forever, free_forever_note, trial_email_hash, user_uid
        FROM devices`,
     )
     .all();
@@ -594,12 +755,22 @@ export function getFinanceOverview() {
   let trialCount = 0;
   let payingInactiveCount = 0;
   let trialInactiveCount = 0;
+  let freeForeverCount = 0;
   let estimatedApiCostMonth = 0;
   const deviceBreakdown = [];
 
   for (const d of allDevices) {
-    const fin = deviceFinanceStatus(d.first_seen, d.last_seen, now);
-    if (fin.status === 'paying') payingCount += 1;
+    const emailTrialStart = getEmailTrialStart(d.trial_email_hash);
+    const emailTrialEligible =
+      !d.trial_email_hash ||
+      (emailTrialStart != null && Date.now() - emailTrialStart < TRIAL_DAYS * 24 * 60 * 60 * 1000);
+    const fin = deviceFinanceStatus(d.first_seen, d.last_seen, now, {
+      freeForever: Boolean(d.free_forever),
+      emailTrialEligible,
+      emailTrialStart,
+    });
+    if (fin.status === 'free_forever') freeForeverCount += 1;
+    else if (fin.status === 'paying') payingCount += 1;
     else if (fin.status === 'trial') trialCount += 1;
     else if (fin.status === 'paying_inactive') payingInactiveCount += 1;
     else trialInactiveCount += 1;
@@ -610,11 +781,17 @@ export function getFinanceOverview() {
       estimatedApiCostMonth += apiCostMonth;
     }
 
-    const revenueSek = fin.status === 'paying' ? targetPriceSek : 0;
+    const revenueSek =
+      fin.status === 'paying' ? targetPriceSek : fin.status === 'free_forever' ? 0 : 0;
 
     deviceBreakdown.push({
       device_id: d.device_id,
-      status: fin.status,
+      status: d.blocked ? 'blocked' : fin.status,
+      blocked: Boolean(d.blocked),
+      freeForever: Boolean(d.free_forever),
+      freeForeverNote: d.free_forever_note ?? null,
+      hasTrialEmail: Boolean(d.trial_email_hash),
+      trialEmailEligible: emailTrialEligible,
       first_seen: d.first_seen,
       last_seen: d.last_seen,
       country: d.country,
@@ -627,7 +804,7 @@ export function getFinanceOverview() {
     });
   }
 
-  const statusOrder = { paying: 0, trial: 1, paying_inactive: 2, trial_inactive: 3 };
+  const statusOrder = { paying: 0, free_forever: 1, trial: 2, paying_inactive: 3, trial_inactive: 4 };
   deviceBreakdown.sort(
     (a, b) =>
       (statusOrder[a.status] ?? 9) - (statusOrder[b.status] ?? 9) ||
@@ -663,9 +840,10 @@ export function getFinanceOverview() {
     subscribers: {
       paying: payingCount,
       trial: trialCount,
+      freeForever: freeForeverCount,
       payingInactive: payingInactiveCount,
       trialInactive: trialInactiveCount,
-      activeTotal: payingCount + trialCount,
+      activeTotal: payingCount + trialCount + freeForeverCount,
       totalDevices: allDevices.length,
     },
     revenue: {
@@ -710,7 +888,8 @@ export function getFinanceOverview() {
 export function getDeviceDetail(deviceId) {
   const device = db
     .prepare(
-      `SELECT device_id, first_seen, last_seen, app_version, platform, opens, country, locale, timezone
+      `SELECT device_id, first_seen, last_seen, app_version, platform, opens, country, locale, timezone,
+              blocked, blocked_at, blocked_reason, free_forever, free_forever_note, trial_email_hash, user_uid
        FROM devices WHERE device_id = ?`,
     )
     .get(deviceId);
@@ -741,7 +920,15 @@ export function getDeviceDetail(deviceId) {
   }
 
   const costMonth = getDeviceEstimatedCostMonth(deviceId);
-  const fin = deviceFinanceStatus(device.first_seen, device.last_seen, Date.now());
+  const emailTrialStart = getEmailTrialStart(device.trial_email_hash);
+  const emailTrialEligible =
+    !device.trial_email_hash ||
+    (emailTrialStart != null && Date.now() - emailTrialStart < TRIAL_DAYS * 24 * 60 * 60 * 1000);
+  const fin = deviceFinanceStatus(device.first_seen, device.last_seen, Date.now(), {
+    freeForever: Boolean(device.free_forever),
+    emailTrialEligible,
+    emailTrialStart,
+  });
   const recentEvents = db
     .prepare(
       'SELECT ts, type, app_version, platform, meta FROM events WHERE device_id = ? ORDER BY ts DESC LIMIT 25',
@@ -762,6 +949,9 @@ export function getDeviceDetail(deviceId) {
       trialDaysLeft: fin.trialDaysLeft,
       isPaying: fin.isPaying,
       revenueSek: fin.status === 'paying' ? limits.targetPriceSek : 0,
+      trialEmailKnown: Boolean(device.trial_email_hash),
+      trialEmailEligible: emailTrialEligible,
+      trialEmailStartedAt: emailTrialStart,
     },
     limits: {
       chatsPerDay: limits.chatsPerDay,
@@ -770,4 +960,65 @@ export function getDeviceDetail(deviceId) {
     },
     recentEvents,
   };
+}
+
+/** Monthly growth stats for the last 12 months (UTC). */
+export function getGrowthStats() {
+  const now = Date.now();
+  const day = 24 * 60 * 60 * 1000;
+  const trialMs = TRIAL_DAYS * day;
+  const activeWindowMs = ACTIVE_WINDOW_DAYS * day;
+  const months = [];
+
+  for (let i = 11; i >= 0; i -= 1) {
+    const d = new Date();
+    d.setUTCDate(1);
+    d.setUTCHours(0, 0, 0, 0);
+    d.setUTCMonth(d.getUTCMonth() - i);
+    const monthStart = d.getTime();
+    const next = new Date(d);
+    next.setUTCMonth(next.getUTCMonth() + 1);
+    const monthEnd = next.getTime();
+    const label = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+
+    const newDevices =
+      db
+        .prepare('SELECT COUNT(*) AS c FROM devices WHERE first_seen >= ? AND first_seen < ?')
+        .get(monthStart, monthEnd)?.c ?? 0;
+
+    const activeDevices =
+      db
+        .prepare('SELECT COUNT(*) AS c FROM devices WHERE last_seen >= ? AND last_seen < ?')
+        .get(monthStart, monthEnd)?.c ?? 0;
+
+    const deviceRows = db
+      .prepare(
+        `SELECT first_seen, last_seen, free_forever, trial_email_hash
+         FROM devices WHERE last_seen >= ? AND last_seen < ?`,
+      )
+      .all(monthStart, monthEnd);
+
+    let paying = 0;
+    for (const row of deviceRows) {
+      if (row.free_forever) continue;
+      const emailTrialStart = getEmailTrialStart(row.trial_email_hash);
+      const emailTrialEligible =
+        !row.trial_email_hash ||
+        (emailTrialStart != null && monthEnd - emailTrialStart < trialMs);
+      const fin = deviceFinanceStatus(row.first_seen, row.last_seen, monthEnd - 1, {
+        emailTrialEligible,
+        emailTrialStart,
+      });
+      if (fin.status === 'paying') paying += 1;
+    }
+
+    months.push({
+      month: label,
+      newDevices,
+      activeDevices,
+      paying,
+    });
+  }
+
+  return { generatedAt: now, months };
 }

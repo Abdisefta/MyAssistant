@@ -15,6 +15,7 @@ export const AndroidImportance = { HIGH: 4, DEFAULT: 3, LOW: 2 };
 
 export const SchedulableTriggerInputTypes = {
   DATE: 'date' as const,
+  WEEKLY: 'weekly' as const,
 };
 
 export function setNotificationHandler(_handler: unknown): void {}

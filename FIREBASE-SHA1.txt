@@ -1,0 +1,10 @@
+Firebase SHA-1 för nuvarande release-bygg (debug-keystore)
+============================================================
+
+Klistra in i Firebase Console → Project settings → Android app → Add fingerprint:
+
+5E:8F:16:06:2E:A3:CD:2C:4A:0D:54:78:76:BA:A6:F3:8C:AB:F6:25
+
+Obs: Release-bygget (MyAssistant194.apk / .aab) signeras just nu med debug.keystore.
+Det räcker för test och tidig Play-uppladdning. Innan riktig produktion kan vi skapa
+en egen release-keystore tillsammans — då behöver ny SHA-1 läggas in i Firebase.

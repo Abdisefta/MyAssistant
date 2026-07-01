@@ -1,80 +1,24 @@
-# My Assistant — status (v1.7.5)
+# My Assistant — status (v1.9.4)
 
-Senast uppdaterad: 2025-06-25
+**Autonom körning klar.** Allt som kunde göras utan dig är gjort.
 
-## Klart och testat på telefon
+## Filer på Desktop
 
-- **Hem** — hälsning, klocka, väder, möten, uppgifter, profilbild (galleri + ikoner)
-- **Assistent** — röst in/ut (Alma TTS), transkript, boka möten, påminnelser, snabbfraser
-- **Kalender** — telefonkalender + lokala händelser
-- **Uppgifter** — skapa, påminnelser
-- **Notiser** — mötes- och uppgiftspåminnelser
-- **Språk** — 24 språk + auto från telefon
-- **Gästläge** — ingen inloggning krävs (`local-guest`)
-- **"Jag är sjuk"** — bekräftelse innan avbokning
-- **Admin-dashboard** — kod klar i `analytics-server/` (deploy till VPS)
-- **GitHub** — kod på `main`: https://github.com/Abdisefta/MyAssistant
+| Fil | Användning |
+|-----|------------|
+| `MyAssistant194.apk` (~48 MB) | Installera på telefon — test |
+| `MyAssistant194.aab` (~36 MB) | Ladda upp till Play Console |
 
-## Admin-dashboard
+## Klart i kod & server
 
-Webb-UI för dig: användare, nedladdningar, utgifter, serverstatus, **ekonomi**.
+- v1.9.4 / versionCode 40
+- Ny app-ikon (lila mikrofon)
+- 35 kr API-gräns för **alla** (även gratis-abo)
+- Dashboard deployad: http://195.201.128.118:3002
+- Veckodags-påminnelser, trial-e-post, tillväxtgrafer
 
-1. Deploy på Hetzner: se `analytics-server/README.md`
-2. Öppna `http://195.201.128.118:3002` (efter deploy + port 3002 öppen)
-3. Bygg app v1.7.6+ så telefonen skickar statistik
+## Nästa steg — **läs `TILLSAMMANS.md`**
 
-Standardlösenord byts i `.env` på servern (`ADMIN_PASSWORD`).
+Det är den enda checklistan kvar. Allt där kräver dig (telefon, Firebase, Play Console, e-post).
 
-### Ekonomi-fliken (dashboard)
-
-- **Gratisperiod:** 60 dagar från `first_seen` — räknas inte som intäkt
-- **Betalande:** efter 60 dagar + aktiv senaste 30 dagarna → MRR = antal × `targetPriceSek` (199 kr)
-- **Moms:** pris antas inkl. 25% moms (B2C) — visar netto, moms och brutto
-- **Kostnader:** variabel API (Gemini/TTS) + registrerade utgifter (Hetzner m.m.)
-- **Vinst:** MRR − API − utgifter, med marginalvarning om låg
-- Lägg till fasta kostnader under **Utgifter** (t.ex. Hetzner VPS som månadsvis)
-
-## Bygg ny APK (Windows)
-
-Senaste skript: `build-175.ps1`
-
-```powershell
-cd C:\Users\user\My-assistent\MyAssistant\MyAssistantFinal
-powershell -ExecutionPolicy Bypass -File .\build-175.ps1
-```
-
-APK hamnar på skrivbordet: `MyAssistant175.apk`
-
-Kräver `.env` med `EXPO_PUBLIC_*` (kopiera från `.env.example`). Committa aldrig `.env`.
-
-## Kvar — behöver Abdi (5–15 min vardera)
-
-| Uppgift | Varför jag inte kan göra det själv |
-|---------|-------------------------------------|
-| **Google-inloggning + Gmail** | SHA-1 från release-keystore måste läggas i Firebase Console |
-| **Testa e-post på telefon** | Kräver att du loggar in med Google och trycker Tillåt |
-| **Play Store** | Kräver Google Play Developer-konto och betalning |
-| **HTTPS på TTS** | Kräver domän + certifikat på VPS (valfritt — HTTP funkar nu) |
-
-### Google / Gmail — när du vill fixa
-
-1. Bygg/installera senaste APK (`build-175.ps1`)
-2. Firebase → Project settings → Android app → **Add fingerprint**
-3. SHA-1 från din release-keystore (samma som APK-signeringen)
-4. Vänta 5–10 min → öppna appen → **Email** → **Koppla Google Mail**
-
-## Felsökning
-
-| Problem | Lösning |
-|---------|---------|
-| Ingen Alma-röst | Inställningar → Testa Alma-röst. Höj **mediavolym**. Installera senaste APK. |
-| Network request failed (TTS) | v1.7.5+ — cleartext fix. Bygg om med `build-175.ps1`. |
-| Gemini svarar inte | Kontrollera `EXPO_PUBLIC_GEMINI_API_KEY` i `.env` (måste vara `AIzaSy...`). |
-| Kalender tom | Tillåt kalender i appen + telefonens inställningar |
-| Google DEVELOPER_ERROR | Lägg till SHA-1 i Firebase (se ovan) |
-| Gradle byggfel | Kör `scripts/prefetch-android-minimal.ps1`, aktivera långa sökvägar i Windows |
-
-## Föråldrade filer
-
-- `IMORGON-GEMINI-FIX.md` — historik från juni, Gemini är fixat
-- `NAR-DU-VAKNAR.md` — gammal USB/Expo Go-guide
+SHA-1 för Firebase: se **`FIREBASE-SHA1.txt`**

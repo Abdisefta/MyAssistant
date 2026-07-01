@@ -109,6 +109,8 @@ export type Translations = {
   gmail: {
     title: string;
     subtitle: string;
+    connectButton: string;
+    connectHint: string;
   };
   welcome: {
     default: string;
@@ -192,6 +194,10 @@ export type Translations = {
     periodMonth: string;
     periodBudget: string;
     limitDetail: string;
+    warningTitle: string;
+    warningSubtitle: string;
+    blockedTitle: string;
+    blockedClose: string;
   };
 };
 

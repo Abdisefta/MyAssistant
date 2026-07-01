@@ -10,6 +10,8 @@ import {
   continueEmailConversation,
   executeSickDayAction,
   handleTaskReminderRequest,
+  handleBirthdaySaveRequest,
+  looksLikeBirthdaySaveRequest,
   handleTaskRemoveRequest,
   handleSickDayRequest,
   isBookingConfirmation,
@@ -29,6 +31,7 @@ import {
   tryCancelCalendarBookingFromContext,
   isAffirmativeReply,
   assistantAskedAboutCancel,
+  shouldAutoConfirmCalendarBooking,
   tryCreatePendingBooking,
   trySendEmailAfterConfirmation,
   trySendPendingEmail,
@@ -42,6 +45,7 @@ import {
 import { getUpcomingMeetingsSummary } from '@/services/meeting-context';
 import { getInboxSummaryForAgent } from '@/services/email-context';
 import { syncMeetingReminders } from '@/services/meeting-reminders';
+import { syncBirthdayReminders } from '@/services/birthday-reminders';
 import {
   buildSystemPrompt,
   createMessage,
@@ -50,11 +54,12 @@ import {
   clearConversationHistory,
 } from '@/services/memory';
 import { recordAssistantMessage } from '@/services/usage-stats';
-import { checkUsageAllowed, isUsageLimitError, isUsageLimitMessage, recordBillableUsage } from '@/services/usage-limits';
+import { isUsageLimitError, isUsageLimitMessage, recordBillableUsage, checkUsageAllowed } from '@/services/usage-limits';
 import { setNotificationAlertStyle } from '@/services/notification-settings';
 import { initAssistantVoice, speakAssistant } from '@/services/speech';
 import { cancelTaskReminder, scheduleTaskReminder } from '@/services/task-reminders';
-import type { AgentTask, ConversationMessage, NotificationAlertStyle, UserMemory } from '@/types/memory';
+import { hapticSuccess } from '@/utils/haptics';
+import type { AgentTask, ConversationMessage, NotificationAlertStyle, TaskRecurrence, UserMemory } from '@/types/memory';
 import type { PendingCalendarBooking, PendingEmailDraft, PendingSickDay } from '@/types/assistant';
 
 export type TranscriptEntry = {
@@ -66,6 +71,7 @@ export type TranscriptEntry = {
 export type UseAssistantOptions = {
   getGoogleAccessToken?: () => string | null | undefined;
   refreshGoogleAccessToken?: () => Promise<string | null>;
+  onBookingSuccess?: (summary: string) => void;
 };
 
 function historyToTranscript(
@@ -118,6 +124,13 @@ function mergeUnique(existing: string[], additions: string[]): string[] {
   return merged;
 }
 
+function notifyIfBookingSuccess(reply: string, onBookingSuccess?: (summary: string) => void): void {
+  const match = reply.match(/^Bokat:\s*(.+?)\.?$/);
+  if (!match) return;
+  hapticSuccess();
+  onBookingSuccess?.(match[1].trim());
+}
+
 async function resolveGoogleToken(
   getToken: () => string | null | undefined,
   refreshToken?: () => Promise<string | null>,
@@ -168,8 +181,9 @@ export function useAssistant(userId?: string, options: UseAssistantOptions = {})
   const refreshReminders = useCallback(async (mem: UserMemory) => {
     try {
       await syncMeetingReminders(mem);
+      await syncBirthdayReminders(mem, mem.notificationAlertStyle ?? 'sound');
     } catch (error) {
-      console.warn('Meeting reminders sync failed:', error);
+      console.warn('Reminder sync failed:', error);
     }
   }, []);
 
@@ -226,7 +240,15 @@ export function useAssistant(userId?: string, options: UseAssistantOptions = {})
       setMemory(withHistory);
       setTranscript(historyToTranscript(updatedHistory, strings.welcome.default));
       speak(reply);
+      notifyIfBookingSuccess(reply, optionsRef.current.onBookingSuccess);
       setIsThinking(false);
+
+      // Spara direkt så uppgifter/kalender inte försvinner innan bakgrundslärande körs.
+      try {
+        await saveMemory(withHistory, uid);
+      } catch (saveError) {
+        console.warn('Immediate memory save failed:', saveError);
+      }
 
       void (async () => {
         try {
@@ -321,21 +343,23 @@ export function useAssistant(userId?: string, options: UseAssistantOptions = {})
       const trimmed = text.trim();
       if (!trimmed || !memory || isThinking) return;
 
-      const chatLimit = await checkUsageAllowed('assistant_message');
-      if (!chatLimit.allowed) {
+      const uid = userIdRef.current;
+      if (uid) void recordAssistantMessage(uid);
+
+      const accessLimit = await checkUsageAllowed('assistant_message');
+      if (!accessLimit.allowed) {
         setTranscript((prev) => [
           ...prev.filter((e) => e.id !== 'listening' && e.id !== 'partial'),
           { id: createMessage('user', trimmed).id, role: 'user', text: trimmed },
           {
             id: `limit-${Date.now()}`,
             role: 'system',
-            text: chatLimit.message ?? 'Du har nått dagens gräns. Försök igen imorgon.',
+            text: accessLimit.message ?? 'Assistenten är tillfälligt otillgänglig.',
           },
         ]);
         return;
       }
 
-      void recordAssistantMessage(userIdRef.current);
       void recordBillableUsage('assistant_message');
 
       const userMessage = createMessage('user', trimmed);
@@ -490,8 +514,22 @@ export function useAssistant(userId?: string, options: UseAssistantOptions = {})
 
         if (looksLikeCalendarBookingRequest(trimmed)) {
           const { booking, previewReply } = await prepareCalendarBooking(trimmed, userIdRef.current);
-          pendingCalendarBookingRef.current = booking;
-          await finishReply(memory, historyWithUser, previewReply, trimmed);
+          if (shouldAutoConfirmCalendarBooking(trimmed)) {
+            const bookedReply = await tryCreatePendingBooking(booking, userIdRef.current);
+            await finishReply(memory, historyWithUser, bookedReply, trimmed);
+            if (memory.meetingRemindersEnabled) {
+              void refreshReminders(memory);
+            }
+          } else {
+            pendingCalendarBookingRef.current = booking;
+            await finishReply(memory, historyWithUser, previewReply, trimmed);
+          }
+          return;
+        }
+
+        if (looksLikeBirthdaySaveRequest(trimmed)) {
+          const { reply, updatedMemory } = await handleBirthdaySaveRequest(trimmed, memory);
+          await finishReply(updatedMemory, historyWithUser, reply, trimmed);
           return;
         }
 
@@ -553,6 +591,7 @@ export function useAssistant(userId?: string, options: UseAssistantOptions = {})
               historyWithUser,
               token,
               memory.name,
+              memory.job,
             );
             if (sentReply) {
               await finishReply(memory, historyWithUser, sentReply, trimmed);
@@ -574,6 +613,7 @@ export function useAssistant(userId?: string, options: UseAssistantOptions = {})
               historyWithUser,
               token,
               memory.name,
+              memory.job,
             );
             if (continued) {
               pendingEmailDraftRef.current = continued.draft;
@@ -592,10 +632,9 @@ export function useAssistant(userId?: string, options: UseAssistantOptions = {})
             throw new Error(strings.agent.gmailRequiredEmail);
           }
 
-          const { draft } = await prepareEmailDraft(trimmed, token, memory.name);
-          const sentReply = await trySendPendingEmail(draft, token);
-          pendingEmailDraftRef.current = null;
-          await finishReply(memory, historyWithUser, sentReply, trimmed);
+          const { draft, previewReply } = await prepareEmailDraft(trimmed, token, memory.name, memory.job);
+          pendingEmailDraftRef.current = draft;
+          await finishReply(memory, historyWithUser, previewReply, trimmed);
           return;
         }
 
@@ -712,6 +751,7 @@ export function useAssistant(userId?: string, options: UseAssistantOptions = {})
       setMemory(updated);
       const task = tasks.find((t) => t.id === taskId);
       if (task?.done) {
+        hapticSuccess();
         await cancelTaskReminder(taskId);
       }
     },
@@ -719,7 +759,7 @@ export function useAssistant(userId?: string, options: UseAssistantOptions = {})
   );
 
   const addTask = useCallback(
-    async (text: string, remindAt?: number) => {
+    async (text: string, remindAt?: number, recurrence?: TaskRecurrence) => {
       if (!memory) return;
       const uid = userIdRef.current;
       const trimmed = text.trim();
@@ -729,7 +769,8 @@ export function useAssistant(userId?: string, options: UseAssistantOptions = {})
         id: `task-${Date.now()}`,
         text: trimmed,
         createdAt: Date.now(),
-        remindAt,
+        remindAt: recurrence ? undefined : remindAt,
+        recurrence,
         done: false,
       };
 
@@ -739,7 +780,7 @@ export function useAssistant(userId?: string, options: UseAssistantOptions = {})
       };
       await saveMemory(updated, uid);
       setMemory(updated);
-      if (remindAt) {
+      if (remindAt || recurrence) {
         await scheduleTaskReminder(task, memory.notificationAlertStyle ?? 'sound');
       }
     },
@@ -811,7 +852,7 @@ export function useAssistant(userId?: string, options: UseAssistantOptions = {})
       setMemory(updated);
       await refreshReminders(updated);
       for (const task of updated.tasks) {
-        if (!task.done && task.remindAt && task.remindAt > Date.now()) {
+        if (!task.done && (task.recurrence || (task.remindAt && task.remindAt > Date.now()))) {
           await scheduleTaskReminder(task, style);
         }
       }

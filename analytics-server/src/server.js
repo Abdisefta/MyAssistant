@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import cors from 'cors';
 import express from 'express';
 
-import { addExpense, deleteExpense, getOverview, getFinanceOverview, listExpenses, recordEvent, checkUsageLimit, getUsageLimits, setUsageLimits, getDeviceDetail } from './db.js';
+import { addExpense, deleteExpense, getOverview, getFinanceOverview, getGrowthStats, listExpenses, recordEvent, checkUsageLimit, getBudgetStatus, getUsageLimits, setUsageLimits, getDeviceDetail, blockDevice, unblockDevice, deleteDevice, setDeviceFreeForever, registerTrialEmail, hasTrialEligible } from './db.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT ?? 3002);
@@ -106,7 +106,7 @@ app.post('/api/events', requireApiKey, (req, res) => {
     if (err?.code === 'limit_exceeded') {
       return res.status(429).json({
         error: 'limit_exceeded',
-        message: err.details?.message ?? 'Daglig gräns nådd för denna enhet.',
+        message: err.details?.message ?? 'Månadens kostnadsgräns är nådd. Köp ett nytt paket.',
         ...err.details,
       });
     }
@@ -124,8 +124,39 @@ app.get('/api/limits/check', requireApiKey, (req, res) => {
   const check = checkUsageLimit(deviceId, type);
   res.json({
     ...check,
-    message: check.allowed ? null : (check.message ?? 'Du har nått dagens gräns. Försök igen imorgon.'),
+    message: check.allowed ? null : (check.message ?? 'Månadens kostnadsgräns är nådd. Köp ett nytt paket.'),
   });
+});
+
+app.get('/api/limits/budget', requireApiKey, (req, res) => {
+  const deviceId = String(req.query.deviceId ?? '');
+  if (!deviceId) {
+    return res.status(400).json({ error: 'deviceId required' });
+  }
+  res.json(getBudgetStatus(deviceId));
+});
+
+app.post('/api/trial/register', requireApiKey, (req, res) => {
+  const { deviceId, email, uid } = req.body ?? {};
+  if (!deviceId || typeof deviceId !== 'string' || deviceId.length > 128) {
+    return res.status(400).json({ error: 'deviceId required' });
+  }
+  if (!email || typeof email !== 'string' || email.length > 256) {
+    return res.status(400).json({ error: 'email required' });
+  }
+  const result = registerTrialEmail(email, deviceId, typeof uid === 'string' ? uid : null);
+  if (!result.ok) {
+    return res.status(400).json(result);
+  }
+  res.json(result);
+});
+
+app.get('/api/trial/eligible', requireApiKey, (req, res) => {
+  const email = String(req.query.email ?? '');
+  if (!email) {
+    return res.status(400).json({ error: 'email required' });
+  }
+  res.json({ eligible: hasTrialEligible(email) });
 });
 
 app.get('/api/admin/limits', requireAdmin, (_req, res) => {
@@ -173,6 +204,49 @@ app.get('/api/admin/devices/:deviceId', requireAdmin, (req, res) => {
     return res.status(404).json({ error: 'Enhet hittades inte' });
   }
   res.json(detail);
+});
+
+app.post('/api/admin/devices/:deviceId/block', requireAdmin, (req, res) => {
+  const deviceId = String(req.params.deviceId ?? '');
+  const reason = typeof req.body?.reason === 'string' ? req.body.reason : 'Missbruk';
+  const detail = blockDevice(deviceId, reason);
+  if (!detail) {
+    return res.status(404).json({ error: 'Enhet hittades inte' });
+  }
+  res.json(detail);
+});
+
+app.post('/api/admin/devices/:deviceId/unblock', requireAdmin, (req, res) => {
+  const deviceId = String(req.params.deviceId ?? '');
+  const detail = unblockDevice(deviceId);
+  if (!detail) {
+    return res.status(404).json({ error: 'Enhet hittades inte' });
+  }
+  res.json(detail);
+});
+
+app.post('/api/admin/devices/:deviceId/free-forever', requireAdmin, (req, res) => {
+  const deviceId = String(req.params.deviceId ?? '');
+  const enabled = Boolean(req.body?.enabled);
+  const note = typeof req.body?.note === 'string' ? req.body.note : null;
+  const detail = setDeviceFreeForever(deviceId, enabled, note);
+  if (!detail) {
+    return res.status(404).json({ error: 'Enhet hittades inte' });
+  }
+  res.json(detail);
+});
+
+app.get('/api/admin/growth', requireAdmin, (_req, res) => {
+  res.json(getGrowthStats());
+});
+
+app.delete('/api/admin/devices/:deviceId', requireAdmin, (req, res) => {
+  const deviceId = String(req.params.deviceId ?? '');
+  const ok = deleteDevice(deviceId);
+  if (!ok) {
+    return res.status(404).json({ error: 'Enhet hittades inte' });
+  }
+  res.json({ ok: true });
 });
 
 app.get('/api/admin/expenses', requireAdmin, (_req, res) => {

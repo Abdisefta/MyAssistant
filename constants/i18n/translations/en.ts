@@ -81,9 +81,10 @@ export const en: Translations = {
     start: 'Get started',
   },
   gmail: {
-    title: 'Gmail coming soon',
-    subtitle:
-      'You are in the app. Email will connect to Google in a later version. Assistant and Calendar work now.',
+    title: 'Connect Gmail',
+    subtitle: 'Read and send email in the app. Sign in with your Google account.',
+    connectButton: 'Connect Google Mail',
+    connectHint: 'Google will ask for Gmail access. Tap Allow to continue.',
   },
   welcome: {
     default:
@@ -159,15 +160,20 @@ export const en: Translations = {
     genericError: 'Something went wrong. Try again.',
   },
   upgrade: {
-    title: 'Upgrade your plan',
-    subtitle: 'You have reached the free usage limit. Upgrade for unlimited access.',
-    planLabel: 'My Assistant Pro',
-    planHint: 'More chats, voice, and AI — subscription coming soon.',
-    comingSoon: 'Coming soon — stay tuned',
+    title: 'Buy a new package',
+    subtitle:
+      'You have reached the monthly cost limit (35 SEK). Buy a new package to keep using the assistant.',
+    planLabel: 'My Assistant Pro — new package',
+    planHint: 'Unlimited assistant until the next cost limit. In-app purchase coming soon.',
+    comingSoon: 'Buy package — coming soon',
     close: 'Not now',
     periodDay: 'today',
     periodMonth: 'this month',
-    periodBudget: 'cost budget',
-    limitDetail: 'Used {{used}} of {{limit}} ({{period}}).',
+    periodBudget: 'monthly cost',
+    limitDetail: 'Used {{used}} SEK of {{limit}} SEK ({{period}}).',
+    warningTitle: 'Package running low',
+    warningSubtitle: 'You are nearing the monthly cost limit. Buy a new package so the assistant is not paused.',
+    blockedTitle: 'Account blocked',
+    blockedClose: 'Close',
   },
 };

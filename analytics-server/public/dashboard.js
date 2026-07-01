@@ -53,10 +53,17 @@ function statusBadge(status) {
   const labels = {
     paying: 'Betalande',
     trial: 'Gratisperiod',
+    free_forever: 'Gratis abonnemang',
     paying_inactive: 'Betalande (inaktiv)',
     trial_inactive: 'Trial (inaktiv)',
+    blocked: 'Spärrad',
   };
   return `<span class="status-badge ${status}">${labels[status] ?? status}</span>`;
+}
+
+function freeForeverBadge(device) {
+  if (!device?.freeForever) return '';
+  return `<span class="status-badge free_forever" title="${device.freeForeverNote ?? 'Betalar inte 199 kr — 35 kr API-gräns gäller'}">Gratis abo</span>`;
 }
 
 function renderFinance(data) {
@@ -107,6 +114,7 @@ function renderFinance(data) {
   document.getElementById('finance-subscribers').innerHTML = `
     <div class="row"><span>Betalande (aktiva)</span><strong>${sub.paying ?? 0}</strong></div>
     <div class="row"><span>Gratisperiod (aktiva)</span><strong>${sub.trial ?? 0}</strong></div>
+    <div class="row"><span>Gratis abonnemang</span><strong>${sub.freeForever ?? 0}</strong></div>
     <div class="row"><span>Betalande men inaktiva (30d)</span><strong>${sub.payingInactive ?? 0}</strong></div>
     <div class="row"><span>Trial inaktiva</span><strong>${sub.trialInactive ?? 0}</strong></div>
     <div class="row"><span>Totalt enheter</span><strong>${sub.totalDevices ?? 0}</strong></div>`;
@@ -116,7 +124,7 @@ function renderFinance(data) {
     <tbody>${(data.devices ?? [])
       .map(
         (d) => `<tr class="clickable" data-device-id="${d.device_id}">
-          <td>${d.device_id.slice(0, 8)}…</td>
+          <td>${d.device_id.slice(0, 8)}… ${freeForeverBadge(d)}</td>
           <td>${statusBadge(d.status)}</td>
           <td>${d.country ?? '—'}</td>
           <td>${formatSek(d.apiCostMonth, 2)}</td>
@@ -128,6 +136,30 @@ function renderFinance(data) {
       .join('')}</tbody></table>` || '<p class="muted">Inga enheter ännu</p>';
 
   bindDeviceClicks();
+}
+
+function renderMonthlyChart(containerId, months, valueKey, label) {
+  const el = document.getElementById(containerId);
+  const entries = months ?? [];
+  if (!entries.length) {
+    el.innerHTML = '<p class="muted">Ingen data ännu</p>';
+    return;
+  }
+  const max = Math.max(...entries.map((m) => m[valueKey] ?? 0), 1);
+  el.innerHTML = entries
+    .map((m) => {
+      const value = m[valueKey] ?? 0;
+      const h = Math.max(4, Math.round((value / max) * 100));
+      return `<div class="bar-wrap" title="${m.month}: ${value} ${label}"><div class="bar" style="height:${h}px"></div><span class="bar-label">${m.month.slice(5)}</span></div>`;
+    })
+    .join('');
+}
+
+function renderGrowthCharts(data) {
+  const months = data?.months ?? data ?? [];
+  renderMonthlyChart('growth-new-chart', months, 'newDevices', 'nya enheter');
+  renderMonthlyChart('growth-active-chart', months, 'activeDevices', 'aktiva enheter');
+  renderMonthlyChart('growth-paying-chart', months, 'paying', 'betalande');
 }
 
 function renderChart(containerId, chartData) {
@@ -166,8 +198,12 @@ async function openDeviceModal(deviceId) {
     const data = await api(`/api/admin/devices/${encodeURIComponent(deviceId)}`);
     const d = data.device;
     const u = data.usage ?? {};
+    const isBlocked = Boolean(d.blocked);
+    const isFreeForever = Boolean(d.free_forever);
     body.innerHTML = `
       <p class="device-id-mono">${d.device_id}</p>
+      ${isBlocked ? `<div class="finance-warning bad">Spärrad${d.blocked_reason ? `: ${d.blocked_reason}` : ''}${d.blocked_at ? ` · ${formatDate(d.blocked_at)}` : ''}</div>` : ''}
+      ${isFreeForever ? `<div class="finance-warning info">Gratis abonnemang — betalar inte 199 kr/mån. 35 kr API-gräns gäller fortfarande.${d.free_forever_note ? ` Anteckning: ${d.free_forever_note}` : ''}</div>` : ''}
       <div class="section-title">Plats &amp; språk</div>
       <div class="row"><span>Land</span><strong>${countryLabel(d.country)}</strong></div>
       <div class="row"><span>Locale</span><strong>${d.locale ?? '—'}</strong></div>
@@ -185,6 +221,7 @@ async function openDeviceModal(deviceId) {
       <div class="row"><span>App-öppningar</span><strong>${u.app_open?.month ?? 0}</strong></div>
       <div class="section-title">Abonnemang</div>
       <div class="row"><span>Status</span><strong>${statusBadge(data.subscription?.status ?? 'trial')}</strong></div>
+      ${data.subscription?.trialEmailKnown ? `<div class="row"><span>E-post trial</span><strong>${data.subscription.trialEmailEligible ? 'Aktiv gratisperiod' : 'Gratisperiod förbrukad'}</strong></div>` : '<div class="row"><span>E-post trial</span><strong class="muted">Okänd (gäst/enhet)</strong></div>'}
       ${data.subscription?.trialDaysLeft > 0 ? `<div class="row"><span>Gratisperiod kvar</span><strong>${data.subscription.trialDaysLeft} dagar</strong></div>` : ''}
       ${data.subscription?.revenueSek > 0 ? `<div class="row"><span>Intäkt / mån</span><strong>${formatSek(data.subscription.revenueSek)}</strong></div>` : ''}
       <div class="section-title">Kostnad &amp; gränser</div>
@@ -197,10 +234,83 @@ async function openDeviceModal(deviceId) {
           (e) =>
             `<div class="row"><span>${e.type}</span><span class="muted">${formatDate(e.ts)}</span></div>`,
         )
-        .join('') || '<p class="muted">Inga händelser</p>'}`;
+        .join('') || '<p class="muted">Inga händelser</p>'}
+      <div class="section-title">Administration</div>
+      <div class="device-admin-row">
+        <label class="toggle-row">
+          <input type="checkbox" id="device-free-forever-toggle" ${isFreeForever ? 'checked' : ''} />
+          Gratis abonnemang (ingen 199 kr)
+        </label>
+        <p class="muted small">35 kr/mån API-gräns gäller fortfarande för alla.</p>
+        <input type="text" id="device-free-forever-note" placeholder="Anteckning (valfritt)" value="${d.free_forever_note ? String(d.free_forever_note).replace(/"/g, '&quot;') : ''}" />
+        <button type="button" class="btn-secondary" id="device-free-forever-save">Spara gratis-status</button>
+      </div>
+      <div class="device-admin-actions">
+        ${
+          isBlocked
+            ? `<button type="button" class="btn-secondary" id="device-unblock-btn">Ta bort spärr</button>`
+            : `<button type="button" class="btn-warn" id="device-block-btn">Spärra enhet</button>`
+        }
+        <button type="button" class="btn-danger" id="device-delete-btn">Ta bort enhet</button>
+      </div>
+      <p class="muted device-admin-hint">Spärra stoppar assistenten direkt. Ta bort raderar all statistik (kan inte ångras).</p>`;
+    document.getElementById('device-free-forever-save')?.addEventListener('click', () => {
+      const enabled = Boolean(document.getElementById('device-free-forever-toggle')?.checked);
+      const note = document.getElementById('device-free-forever-note')?.value ?? '';
+      void setFreeForeverAction(deviceId, enabled, note);
+    });
+    document.getElementById('device-block-btn')?.addEventListener('click', () => {
+      const reason = window.prompt('Anledning till spärr (valfritt):', 'Missbruk');
+      if (reason === null) return;
+      void blockDeviceAction(deviceId, reason);
+    });
+    document.getElementById('device-unblock-btn')?.addEventListener('click', () => {
+      void unblockDeviceAction(deviceId);
+    });
+    document.getElementById('device-delete-btn')?.addEventListener('click', () => {
+      if (
+        !window.confirm(
+          'Ta bort denna enhet och all statistik permanent? Assistenten kan ansluta igen som ny enhet.',
+        )
+      ) {
+        return;
+      }
+      void deleteDeviceAction(deviceId);
+    });
   } catch (err) {
     body.innerHTML = `<p class="error">${err.message ?? 'Kunde inte ladda enhet'}</p>`;
   }
+}
+
+async function setFreeForeverAction(deviceId, enabled, note) {
+  await api(`/api/admin/devices/${encodeURIComponent(deviceId)}/free-forever`, {
+    method: 'POST',
+    body: JSON.stringify({ enabled, note }),
+  });
+  await openDeviceModal(deviceId);
+  await loadFinance();
+}
+
+async function blockDeviceAction(deviceId, reason) {
+  await api(`/api/admin/devices/${encodeURIComponent(deviceId)}/block`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  });
+  await openDeviceModal(deviceId);
+  await loadFinance();
+}
+
+async function unblockDeviceAction(deviceId) {
+  await api(`/api/admin/devices/${encodeURIComponent(deviceId)}/unblock`, { method: 'POST' });
+  await openDeviceModal(deviceId);
+  await loadFinance();
+}
+
+async function deleteDeviceAction(deviceId) {
+  await api(`/api/admin/devices/${encodeURIComponent(deviceId)}`, { method: 'DELETE' });
+  closeDeviceModal();
+  await loadFinance();
+  await loadOverview();
 }
 
 function closeDeviceModal() {
@@ -236,6 +346,7 @@ function renderOverview(data) {
 
   renderChart('install-chart', data.charts.installs);
   renderChart('opens-chart', data.charts.opens);
+  renderGrowthCharts(data.charts.growth);
 
   document.getElementById('version-list').innerHTML = (data.versions ?? [])
     .map((r) => `<div class="row"><span>v${r.version}</span><strong>${r.count}</strong></div>`)
@@ -356,12 +467,14 @@ async function renderServerStatus() {
 }
 
 async function refresh() {
-  const [overview, finance] = await Promise.all([
+  const [overview, finance, growth] = await Promise.all([
     api('/api/admin/overview'),
     api('/api/admin/finance'),
+    api('/api/admin/growth'),
   ]);
   renderOverview(overview);
   renderFinance(finance);
+  renderGrowthCharts(growth.months ?? growth);
   await renderServerStatus();
 }
 

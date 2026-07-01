@@ -5,6 +5,9 @@ import {
   parseEmailRequest,
   parseTaskReminderRequest,
 } from '@/services/gemini';
+import { markSentEmailCacheDirty } from '@/services/email-cache-events';
+import { ensureEmailSignature } from '@/services/email-signature';
+import { loadBossContact } from '@/services/boss-contact';
 import { findContactEmailByName, sendGmailMessage } from '@/services/gmail-api';
 import {
   createCalendarEvent,
@@ -21,7 +24,12 @@ import {
   answerEmailQuestion,
   looksLikeEmailReadRequest,
 } from '@/services/email-context';
-import { cancelTaskReminder, scheduleTaskReminder } from '@/services/task-reminders';
+import { cancelTaskReminder, formatTaskReminderLabel, scheduleTaskReminder } from '@/services/task-reminders';
+import {
+  createBirthdayEntry,
+  syncBirthdayReminders,
+} from '@/services/birthday-reminders';
+import { parseSwedishBirthdayDate, parseSwedishClockTime, parseSwedishReminder } from '@/utils/parse-swedish-datetime';
 import type { PendingCalendarBooking, PendingEmailDraft, PendingSickDay } from '@/types/assistant';
 import type { AgentTask, ConversationMessage, UserMemory } from '@/types/memory';
 
@@ -36,7 +44,7 @@ export function looksLikeEmailRequest(text: string): boolean {
 }
 
 export function assistantAskedAboutEmail(text: string): boolean {
-  return /ska jag skicka|förberett ett mail|mejl som väntar|vem vill du maila|vem ska jag skicka|vilket mail|mottagare|skicka det\?/i.test(
+  return /ska jag skicka|förberett ett mail|jag har skrivit detta mail|mejl som väntar|vem vill du maila|vem ska jag skicka|vilket mail|mottagare|skicka det\?/i.test(
     text,
   );
 }
@@ -103,7 +111,7 @@ export function isSendConfirmation(text: string): boolean {
 }
 
 export function shouldAutoSendEmail(text: string): boolean {
-  return looksLikeEmailRequest(text);
+  return false;
 }
 
 function parseSimpleEmailRequest(
@@ -122,16 +130,42 @@ function parseSimpleEmailRequest(
     return { recipientName: directEmail[1], messageIntent: intent };
   }
 
-  const namedRecipient = t.match(
-    /(?:skriv|maila|mejla|skicka)\s+(?:ett\s+)?(?:mail|mejl|e-?post)?\s*till\s+([a-zåäöéüA-ZÅÄÖÉÜ][\wåäöéüÅÄÖÉÜ\s-]{1,40})/i,
+  const emailVerbMatch = t.match(
+    /(?:skriv|maila|mejla|skicka)\s+(?:ett\s+)?(?:mail|mejl|e-?post)?\s*till\s+(.+)/i,
   );
-  if (namedRecipient) {
-    const name = namedRecipient[1]
-      .replace(/\b(?:och|säg|skriv|att)\b.*$/i, '')
-      .trim();
-    const intent =
-      t.match(/\b(?:och\s+)?(?:säg|skriv|att)\s+(.+)$/i)?.[1]?.trim() || 'Hej';
-    if (name) return { recipientName: name, messageIntent: intent };
+  if (!emailVerbMatch) return null;
+
+  let remainder = emailVerbMatch[1].trim();
+
+  const intentAfterKeyword = remainder.match(
+    /\b(?:och\s+)?(?:säg|skriv)\s+(?:att\s+)?(.+)$/i,
+  );
+  if (intentAfterKeyword?.index !== undefined) {
+    const intent = intentAfterKeyword[1].trim();
+    const name = remainder.slice(0, intentAfterKeyword.index).trim();
+    if (name && intent) return { recipientName: name, messageIntent: intent };
+  }
+
+  const jagSplit = remainder.match(
+    /^([A-Za-zÅÄÖåäöéü0-9][A-Za-zÅÄÖåäöéü0-9-]*(?:\s+[A-Za-zÅÄÖåäöéü][A-Za-zÅÄÖåäöéü0-9-]*)*)\s+(jag\s.+)$/i,
+  );
+  if (jagSplit) {
+    return { recipientName: jagSplit[1].trim(), messageIntent: jagSplit[2].trim() };
+  }
+
+  const attSplit = remainder.match(
+    /^([A-Za-zÅÄÖåäöéü0-9][A-Za-zÅÄÖåäöéü0-9-]*(?:\s+[A-Za-zÅÄÖåäöéü][A-Za-zÅÄÖåäöéü0-9-]*)*)\s+(att\s.+)$/i,
+  );
+  if (attSplit) {
+    return {
+      recipientName: attSplit[1].trim(),
+      messageIntent: attSplit[2].replace(/^att\s+/i, '').trim(),
+    };
+  }
+
+  const singleToken = remainder.match(/^([A-Za-zÅÄÖåäöéü0-9][A-Za-zÅÄÖåäöéü0-9-]*)$/);
+  if (singleToken) {
+    return { recipientName: singleToken[1], messageIntent: 'Hej' };
   }
 
   return null;
@@ -140,7 +174,7 @@ function parseSimpleEmailRequest(
 export function isSendCancellation(text: string): boolean {
   if (looksLikeCalendarCancelRequest(text)) return false;
   const t = normalizeSpeechText(text);
-  if (/\b(avbryt|strunta|skicka inte|boka inte|nej tack)\b/.test(t)) {
+  if (/\b(avbryt|strunta|skicka inte|boka inte|nej tack|ändra)\b/.test(t)) {
     return true;
   }
   return /^(nej|cancel|stop)\b/.test(t);
@@ -154,6 +188,7 @@ export function looksLikeTaskOrReminderRequest(text: string): boolean {
   return (
     /\b(påminn|påminna|påminner|kom\s*ihåg|komihåg|notera|uppgift)\b/.test(t) ||
     /\b(kan du|skulle du|vill du|snälla)\b.*\b(påminn|påminna|kom)\b/.test(t) ||
+    /\b(påminn|kom ihåg|komihåg).*\b(dej|dejt|träff|träffa)\b/.test(t) ||
     /\b(handla|köpa|shopping|inköp|göra\s*lista|gör\s*lista|efter jobbet)\b/.test(t) ||
     (/\b(påminn|kom ihåg)\b/.test(t) && t.length > 8)
   );
@@ -223,6 +258,8 @@ export function looksLikeCalendarBookingRequest(text: string): boolean {
   if (looksLikeCalendarCancelRequest(text)) return false;
   if (looksLikeEmailRequest(text)) return false;
   if (looksLikeCalendarReadQuestion(text)) return false;
+  // Påminnelse ska sparas som uppgift — inte bokas i kalendern.
+  if (/\b(påminn|påminna|påminner|kom\s*ihåg|komihåg|notera)\b/.test(t)) return false;
 
   const hasBookVerb =
     /\b(boka|bokar|boka in|boka en tid|boka tid|lägg in|lägg till|lägg|skapa|sätt in|planera|nytt möte|skapa möte|vill ha|behöver|fixa)\b/.test(
@@ -231,11 +268,11 @@ export function looksLikeCalendarBookingRequest(text: string): boolean {
   const hasCalendarNoun =
     /\b(kalender|kalendern|möte|mötes|dejt|avtal|tid|schema|träff|appointment)\b/.test(t);
   const hasTimeHint =
-    /\b(imorgon|idag|på\s+\w+|kl\s*\d|klockan\s*\d|\d{1,2}[:\.]\d{2}|kväll|morgon|eftermiddag|nästa vecka)\b/.test(
+    /\b(imorgon|idag|på\s+\w+|kl\s*\d|klockan\s*(\d|[a-zåäö]+)|\d{1,2}[:\.]\d{2}|kväll|morgon|eftermiddag|nästa vecka)\b/.test(
       t,
     );
   const hasClockTime =
-    /\b(?:kl|klockan)\s*\d|\d{1,2}[:\.]\d{2}\b|\d{1,2}\s*[-–]\s*\d{1,2}\b/.test(t);
+    /\b(?:kl|klockan)\s*(?:\d|[a-zåäö]+)|\d{1,2}[:\.]\d{2}\b|\d{1,2}\s*[-–]\s*\d{1,2}\b/.test(t);
 
   if (hasBookVerb && (hasCalendarNoun || hasTimeHint)) return true;
 
@@ -271,8 +308,14 @@ function formatDraftPreview(draft: PendingEmailDraft): string {
     '',
     draft.body,
     '',
-    'Ska jag skicka det? Säg "skicka" för att bekräfta, eller "avbryt" för att ändra.',
+    'Ska jag skicka det? Säg "ja" eller "skicka" för att bekräfta, eller "nej" / "avbryt" för att ändra.',
   ].join('\n');
+}
+
+function formatSpokenDraftPreview(draft: PendingEmailDraft): string {
+  const intro = `Jag har skrivit detta mail till ${draft.toName}.`;
+  const content = `Ämne: ${draft.subject}. ${draft.body.replace(/\n+/g, ' ')}`;
+  return `${intro}\n\n${content}\n\nSka jag skicka det? Säg "ja" eller "skicka" för att bekräfta, eller "nej" / "avbryt" för att ändra.`;
 }
 
 export async function trySendPendingEmail(
@@ -285,6 +328,7 @@ export async function trySendPendingEmail(
   });
   try {
     await sendGmailMessage(accessToken, draft.to, draft.subject, draft.body);
+    await markSentEmailCacheDirty();
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     if (message.includes('gmail_token_expired') || message.includes('401')) {
@@ -308,6 +352,7 @@ export async function trySendEmailAfterConfirmation(
   history: ConversationMessage[],
   accessToken: string,
   senderName: string,
+  senderJob?: string,
 ): Promise<string | null> {
   const lastAssistant = [...history].reverse().find((m) => m.role === 'assistant');
   if (!lastAssistant || !assistantAskedAboutEmail(lastAssistant.text)) return null;
@@ -324,7 +369,7 @@ export async function trySendEmailAfterConfirmation(
     .filter((m) => m.role === 'user')
     .map((m) => m.text)
     .join(' ');
-  const { draft } = await prepareEmailDraft(userLines, accessToken, senderName);
+  const { draft } = await prepareEmailDraft(userLines, accessToken, senderName, senderJob);
   return trySendPendingEmail(draft, accessToken);
 }
 
@@ -332,6 +377,7 @@ export async function continueEmailConversation(
   historyWithUser: ConversationMessage[],
   accessToken: string,
   senderName: string,
+  senderJob?: string,
 ): Promise<{ draft: PendingEmailDraft; previewReply: string } | null> {
   const parsed = await parseEmailFromConversation(historyWithUser);
   if (!parsed) return null;
@@ -341,13 +387,14 @@ export async function continueEmailConversation(
     .map((m) => m.text)
     .join(' ');
 
-  return prepareEmailDraft(userLines, accessToken, senderName);
+  return prepareEmailDraft(userLines, accessToken, senderName, senderJob);
 }
 
 export async function prepareEmailDraft(
   userMessage: string,
   accessToken: string,
   senderName: string,
+  senderJob?: string,
 ): Promise<{ draft: PendingEmailDraft; previewReply: string }> {
   const parsed = parseSimpleEmailRequest(userMessage) ?? (await parseEmailRequest(userMessage));
   if (!parsed) {
@@ -363,29 +410,23 @@ export async function prepareEmailDraft(
     );
   }
 
-  const composed =
-    parsed.messageIntent.length <= 300
-      ? {
-          subject: 'Meddelande',
-          body: `Hej ${contact.displayName || parsed.recipientName},\n\n${parsed.messageIntent}\n\nVänliga hälsningar,\n${senderName || ''}`.trim(),
-        }
-      : await composeEmailFromRequest(
-          contact.displayName || parsed.recipientName,
-          parsed.messageIntent,
-          senderName,
-          userMessage,
-        );
+  const composed = await composeEmailFromRequest(
+    contact.displayName || parsed.recipientName,
+    parsed.messageIntent,
+    senderName,
+    senderJob,
+  );
 
   const draft: PendingEmailDraft = {
     to: contact.email,
     toName: contact.displayName || parsed.recipientName,
     subject: composed.subject,
-    body: composed.body,
+    body: ensureEmailSignature(composed.body, senderName, senderJob),
   };
 
   return {
     draft,
-    previewReply: `Jag har förberett ett mail:\n\n${formatDraftPreview(draft)}`,
+    previewReply: formatSpokenDraftPreview(draft),
   };
 }
 
@@ -427,39 +468,21 @@ function parseSimpleCalendarBooking(userMessage: string): {
   const day = new Date();
   if (/\bimorgon\b/.test(t)) {
     day.setDate(day.getDate() + 1);
-  } else if (!/\bidag\b/.test(t)) {
+  } else if (/\bidag\b/.test(t)) {
+    // today
+  } else if (/\bövermorgon\b/.test(t)) {
+    day.setDate(day.getDate() + 2);
+  } else {
     return null;
   }
 
-  let hours = 15;
-  let minutes = 0;
-  let endHours: number | null = null;
-  let endMinutes = 0;
+  const clock = parseSwedishClockTime(t);
+  if (!clock) return null;
 
-  const rangeMatch = t.match(/\b(\d{1,2})\s*[-–]\s*(\d{1,2})\b/);
-  if (rangeMatch) {
-    hours = Number(rangeMatch[1]);
-    endHours = Number(rangeMatch[2]);
-    minutes = 0;
-    endMinutes = 0;
-  } else {
-    const klMatch = t.match(/\b(?:kl|klockan)\s*(\d{1,2})(?:[:\.](\d{2}))?\b/);
-    if (klMatch) {
-      hours = Number(klMatch[1]);
-      minutes = klMatch[2] ? Number(klMatch[2]) : 0;
-    } else {
-      const bareHour = t.match(/\b(?:kl|klockan)\s*(\d{1,2})\b/);
-      if (bareHour) {
-        hours = Number(bareHour[1]);
-        minutes = 0;
-      } else {
-        const timeMatch = t.match(/\b(\d{1,2})[:\.](\d{2})\b/);
-        if (!timeMatch) return null;
-        hours = Number(timeMatch[1]);
-        minutes = Number(timeMatch[2]);
-      }
-    }
-  }
+  const hours = clock.hours;
+  const minutes = clock.minutes;
+  let endHours: number | null = clock.endHours ?? null;
+  const endMinutes = 0;
   if (hours > 23 || minutes > 59) return null;
 
   const start = new Date(day);
@@ -1012,6 +1035,35 @@ export async function handleTaskRemoveRequest(
   };
 }
 
+function formatReminderWhenSpeech(remindAt: Date | null, normalized: string): string {
+  if (!remindAt) {
+    const bits: string[] = [];
+    if (/\bimorgon\b/.test(normalized)) bits.push('imorgon');
+    if (/\befter jobbet\b/.test(normalized)) bits.push('efter jobbet');
+    return bits.length ? ` ${bits.join(' ')}` : '';
+  }
+
+  const h = remindAt.getHours();
+  const m = remindAt.getMinutes();
+  const time = m === 0 ? `kl ${h}` : `kl ${h}:${String(m).padStart(2, '0')}`;
+  const now = new Date();
+  const tomorrow = new Date(now);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const sameDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
+
+  if (sameDay(remindAt, tomorrow) || /\bimorgon\b/.test(normalized)) return ` imorgon ${time}`;
+  if (sameDay(remindAt, now) || /\b(idag|i dag)\b/.test(normalized)) return ` idag ${time}`;
+  const date = remindAt.toLocaleDateString('sv-SE', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'short',
+  });
+  return ` ${date} ${time}`;
+}
+
 function parseSimpleTaskReminder(
   userMessage: string,
   userName: string,
@@ -1048,13 +1100,20 @@ function parseSimpleTaskReminder(
     remindAt = new Date(day);
     remindAt.setHours(17, 30, 0, 0);
     taskText = taskText.replace(/\befter jobbet\b/gi, '').trim();
+  } else {
+    const parsed = parseSwedishReminder(userMessage);
+    if (parsed?.remindAt != null) {
+      remindAt = new Date(parsed.remindAt);
+    }
   }
 
-  const klMatch = t.match(/\b(?:kl|klockan)\s*(\d{1,2})(?:[:\.](\d{2}))?\b/);
-  if (klMatch) {
-    remindAt = new Date(day);
-    remindAt.setHours(Number(klMatch[1]), klMatch[2] ? Number(klMatch[2]) : 0, 0, 0);
-    taskText = taskText.replace(/\b(?:kl|klockan)\s*\d{1,2}(?:[:\.]\d{2})?\b/gi, '').trim();
+  if (!remindAt) {
+    const klMatch = t.match(/\b(?:kl|klockan)\s*(\d{1,2})(?:[:\.](\d{2}))?\b/);
+    if (klMatch) {
+      remindAt = new Date(day);
+      remindAt.setHours(Number(klMatch[1]), klMatch[2] ? Number(klMatch[2]) : 0, 0, 0);
+      taskText = taskText.replace(/\b(?:kl|klockan)\s*\d{1,2}(?:[:\.]\d{2})?\b/gi, '').trim();
+    }
   }
 
   taskText = taskText
@@ -1065,13 +1124,10 @@ function parseSimpleTaskReminder(
   if (taskText.length < 2) return null;
 
   const firstName = userName?.split(' ')[0]?.trim() || '';
-  const whenBits: string[] = [];
-  if (/\bimorgon\b/.test(t)) whenBits.push('imorgon');
-  if (/\befter jobbet\b/.test(t)) whenBits.push('efter jobbet');
-  const whenPart = whenBits.length > 0 ? ` ${whenBits.join(' ')}` : '';
+  const whenPart = formatReminderWhenSpeech(remindAt, t);
   const spokenReply = firstName
-    ? `Okej ${firstName}! Jag påminner dig${whenPart} om att ${taskText}.`
-    : `Okej! Jag påminner dig${whenPart} om att ${taskText}.`;
+    ? `Okej ${firstName}! Jag påminner dig${whenPart} om ${taskText}.`
+    : `Okej! Jag påminner dig${whenPart} om ${taskText}.`;
 
   return {
     taskText,
@@ -1094,27 +1150,104 @@ export async function handleTaskReminderRequest(
   }
 
   const remindAt = parsed.remindAtIso ? new Date(parsed.remindAtIso).getTime() : undefined;
+  const swedishParsed = parseSwedishReminder(userMessage);
   const task: AgentTask = {
     id: `task-${Date.now()}`,
     text: parsed.taskText,
     createdAt: Date.now(),
-    remindAt: remindAt && !Number.isNaN(remindAt) ? remindAt : undefined,
+    recurrence: swedishParsed?.recurrence,
+    remindAt:
+      swedishParsed?.recurrence || !remindAt || Number.isNaN(remindAt) ? undefined : remindAt,
     done: false,
   };
+
+  // Visa alltid påminnelsetid i svaret om vi har en.
+  let reply = parsed.spokenReply;
+  if ((task.remindAt || task.recurrence) && !/\bkl\s*\d/.test(reply)) {
+    const label = formatTaskReminderLabel(task, 'sv-SE');
+    if (label && !reply.includes(label)) {
+      reply = reply.replace(/\.\s*$/, '') + `. Du hittar den under Uppgifter (${label}).`;
+    }
+  } else if (!task.remindAt && !task.recurrence) {
+    reply = reply.replace(/\.\s*$/, '') + '. Du hittar den under Uppgifter.';
+  }
 
   const updatedMemory: UserMemory = {
     ...memory,
     tasks: [...memory.tasks.filter((t) => !t.done), task].slice(-20),
   };
 
-  if (task.remindAt) {
+  if (task.remindAt || task.recurrence) {
     await scheduleTaskReminder(task, memory.notificationAlertStyle ?? 'sound');
   }
 
   return {
-    reply: parsed.spokenReply,
+    reply,
     updatedMemory,
   };
+}
+
+export function looksLikeBirthdaySaveRequest(text: string): boolean {
+  const t = normalizeSpeechText(text);
+  return (
+    /\b(födelsedag|födelsedagar|fyller år|fyllde år|spara.*födelsedag|kom ihåg.*födelsedag)\b/.test(t) ||
+    (/\b(födelsedag|fyller)\b/.test(t) && /\b(jan|feb|mar|apr|maj|jun|jul|aug|sep|okt|nov|dec|\d{1,2}\s+\w+)/.test(t))
+  );
+}
+
+function parseBirthdayFromMessage(userMessage: string): { name: string; month: number; day: number } | null {
+  const raw = userMessage.trim();
+  const datePart =
+    raw.match(/\b(\d{1,2}\s+(?:jan(?:uari)?|feb(?:ruari)?|mar(?:s)?|apr(?:il)?|maj|jun(?:i)?|jul(?:i)?|aug(?:usti)?|sep(?:t(?:ember)?)?|okt(?:ober)?|nov(?:ember)?|dec(?:ember)?))\b/i)?.[0] ??
+    raw.match(/\b(\d{1,2}[/.-]\d{1,2})\b/)?.[0];
+  if (!datePart) return null;
+  const parsed = parseSwedishBirthdayDate(datePart);
+  if (!parsed) return null;
+
+  let name = raw
+    .replace(datePart, '')
+    .replace(/\b(spara|kom ihåg|notera|födelsedag|födelsedagar|fyller år|fyllde år|för|att|den|det)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const forMatch = raw.match(/\b(?:för|till)\s+([A-Za-zÅÄÖåäö]+(?:\s+[A-Za-zÅÄÖåäö]+)?)/i);
+  if (forMatch) name = forMatch[1].trim();
+
+  const nameBefore = raw.match(/^([A-Za-zÅÄÖåäö]+(?:\s+[A-Za-zÅÄÖåäö]+)?)\s+(?:fyller|födelsedag)/i);
+  if (nameBefore) name = nameBefore[1].trim();
+
+  if (!name || name.length < 2) name = 'Okänd';
+  return { name, month: parsed.month, day: parsed.day };
+}
+
+export async function handleBirthdaySaveRequest(
+  userMessage: string,
+  memory: UserMemory,
+): Promise<{ reply: string; updatedMemory: UserMemory }> {
+  const parsed = parseBirthdayFromMessage(userMessage);
+  if (!parsed) {
+    throw new Error('Säg t.ex. "Spara födelsedag för Marie 15 juli" eller "Mamma fyller år 3 mars".');
+  }
+
+  const entry = createBirthdayEntry(parsed.name, parsed.month, parsed.day);
+  const existing = memory.birthdays ?? [];
+  const updatedMemory: UserMemory = {
+    ...memory,
+    birthdays: [...existing.filter((b) => b.name.toLowerCase() !== parsed.name.toLowerCase()), entry],
+  };
+
+  await syncBirthdayReminders(updatedMemory, memory.notificationAlertStyle ?? 'sound');
+
+  const label = new Date(2000, parsed.month - 1, parsed.day).toLocaleDateString('sv-SE', {
+    day: 'numeric',
+    month: 'long',
+  });
+  const firstName = memory.name?.split(' ')[0]?.trim();
+  const reply = firstName
+    ? `Okej ${firstName}! Jag sparade ${parsed.name}s födelsedag ${label} och påminner dig dagen innan.`
+    : `Okej! Jag sparade ${parsed.name}s födelsedag ${label} och påminner dig dagen innan.`;
+
+  return { reply, updatedMemory };
 }
 
 export function looksLikeSickDayRequest(text: string): boolean {
@@ -1179,6 +1312,24 @@ function buildSickEmailBody(
   ].join('\n');
 }
 
+function buildBossSickEmailBody(
+  bossName: string,
+  senderName: string,
+  dayLabel: string,
+): string {
+  const greeting = bossName.trim() ? `Hej ${bossName.trim()},` : 'Hej,';
+  const name = senderName.trim() || 'Jag';
+  return [
+    greeting,
+    '',
+    `Jag kontaktar dig för att meddela att jag är sjuk ${dayLabel.toLowerCase()} och därför inte kan komma till jobbet eller delta i möten.`,
+    'Jag återkommer så snart jag är frisk nog att arbeta igen.',
+    '',
+    'Med vänliga hälsningar,',
+    name,
+  ].join('\n');
+}
+
 /** Slutet av sjukdagen (23:59:59) för minnesflagga. */
 export function getSickUntilForDay(day: Date): number {
   const end = new Date(day);
@@ -1193,11 +1344,6 @@ export async function prepareSickDayAction(
   const day = parseSickDayDate(userMessage);
   const dayLabel = formatDayLabel(day);
   const events = await fetchEventsForDay(day, userId);
-
-  if (events.length === 0) {
-    throw new Error(`Du har inga möten ${dayLabel.toLowerCase()}. Vila och bli frisk!`);
-  }
-
   const eventSummaries = events.map((event) => `${event.title} (${formatEventTime(event)})`);
   const listText =
     eventSummaries.length <= 3
@@ -1210,9 +1356,14 @@ export async function prepareSickDayAction(
     eventSummaries,
   };
 
+  const previewReply =
+    events.length === 0
+      ? `Du har inga möten ${dayLabel.toLowerCase()}.`
+      : `Du har ${events.length} möte${events.length > 1 ? 'n' : ''} ${dayLabel.toLowerCase()}: ${listText}.`;
+
   return {
     pending,
-    previewReply: `Du har ${events.length} möte${events.length > 1 ? 'n' : ''} ${dayLabel.toLowerCase()}: ${listText}.`,
+    previewReply,
   };
 }
 
@@ -1235,14 +1386,14 @@ export async function executeSickDayAction(
   userId?: string,
 ): Promise<string> {
   const events = await fetchEventsForDay(pending.day, userId);
-  if (events.length === 0) {
-    return `Det fanns inga möten kvar ${pending.dayLabel.toLowerCase()}.`;
-  }
+  const bossContact = await loadBossContact();
 
   const sentEmails = new Set<string>();
   let emailsSent = 0;
   let emailsFailed = 0;
   let emailsSkipped = 0;
+  let bossEmailSent = false;
+  let bossEmailFailed = false;
 
   for (const event of events) {
     if (!accessToken) {
@@ -1255,13 +1406,11 @@ export async function executeSickDayAction(
     const person = extractPersonFromEvent(event);
 
     let to = directEmail;
-    let toName = person ?? 'deltagare';
 
     if (!to && person) {
       const contact = await findContactEmailByName(accessToken, person);
       if (contact) {
         to = contact.email;
-        toName = contact.displayName;
       }
     }
 
@@ -1284,16 +1433,38 @@ export async function executeSickDayAction(
     }
   }
 
-  const { remaining } = await cancelAllEventsForDay(pending.day, userId);
+  if (bossContact) {
+    if (accessToken) {
+      const bossSubject = `Sjukanmälan — ${pending.dayLabel}`;
+      const bossBody = buildBossSickEmailBody(bossContact.name, senderName, pending.dayLabel);
+      try {
+        await sendGmailMessage(accessToken, bossContact.email, bossSubject, bossBody);
+        bossEmailSent = true;
+      } catch {
+        bossEmailFailed = true;
+      }
+    }
+  }
+
+  let remaining = 0;
+  if (events.length > 0) {
+    const cancelResult = await cancelAllEventsForDay(pending.day, userId);
+    remaining = cancelResult.remaining;
+  }
 
   const parts: string[] = [];
-  parts.push(
-    `Jag avbokade ${events.length} möte${events.length > 1 ? 'n' : ''} ${pending.dayLabel.toLowerCase()}.`,
-  );
+
+  if (events.length > 0) {
+    parts.push(
+      `Jag avbokade ${events.length} möte${events.length > 1 ? 'n' : ''} ${pending.dayLabel.toLowerCase()}.`,
+    );
+  } else {
+    parts.push(`Du hade inga möten ${pending.dayLabel.toLowerCase()}.`);
+  }
 
   if (accessToken) {
     if (emailsSent > 0) {
-      parts.push(`Skickade ${emailsSent} sjukanmälan${emailsSent > 1 ? 'er' : ''} via mail.`);
+      parts.push(`Skickade ${emailsSent} sjukanmälan${emailsSent > 1 ? 'er' : ''} till mötesdeltagare.`);
     }
     if (emailsSkipped > 0) {
       parts.push(
@@ -1301,10 +1472,23 @@ export async function executeSickDayAction(
       );
     }
     if (emailsFailed > 0) {
-      parts.push(`${emailsFailed} mail kunde inte skickas.`);
+      parts.push(`${emailsFailed} mail till deltagare kunde inte skickas.`);
+    }
+    if (bossEmailSent) {
+      const bossLabel = bossContact?.name?.trim() || bossContact?.email || 'din chef';
+      parts.push(`Skickade sjukanmälan till ${bossLabel}.`);
+    }
+    if (bossEmailFailed) {
+      parts.push('Kunde inte skicka sjukanmälan till din chef — försök igen senare.');
     }
   } else {
     parts.push('Koppla Gmail i Email-fliken om du vill att jag mailar deltagarna också.');
+  }
+
+  if (!bossContact) {
+    parts.push('Lägg till din chef i Inställningar för att skicka sjukanmälan.');
+  } else if (!accessToken) {
+    parts.push('Koppla Gmail i Email-fliken för att skicka sjukanmälan till din chef.');
   }
 
   if (remaining > 0) {

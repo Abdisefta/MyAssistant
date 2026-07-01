@@ -13,9 +13,11 @@ import {
 } from 'react-native';
 
 import { BookEventModal } from '@/components/book-event-modal';
+import { CalendarMonthView } from '@/components/calendar-month-view';
 import { APP_COLORS as COLORS } from '@/constants/app-theme';
 import { getSpeechLocale } from '@/constants/i18n/resolve-locale';
 import { useLocale } from '@/contexts/locale-context';
+import { useIsDesktop } from '@/hooks/use-is-desktop';
 import { migrateLegacyCalendarEvents } from '@/services/local-calendar-store';
 import {
   type CalendarAccessState,
@@ -33,6 +35,7 @@ import {
   openAppSettings,
   requestCalendarAccess,
 } from '@/services/device-calendar';
+import { mergeHolidayEvents, getSwedishHolidayForDate } from '@/services/swedish-holidays';
 
 function shiftDay(date: Date, delta: number): Date {
   const next = new Date(date);
@@ -50,6 +53,7 @@ function isSameDay(a: Date, b: Date): boolean {
 
 export function CalendarTab({ userId }: { userId: string }) {
   const { locale, strings, t } = useLocale();
+  const isDesktop = useIsDesktop();
   const speechTag = getSpeechLocale(locale);
   const [selectedDate, setSelectedDate] = useState(() => new Date());
   const [access, setAccess] = useState<CalendarAccessState>('undetermined');
@@ -61,6 +65,8 @@ export function CalendarTab({ userId }: { userId: string }) {
   const [bookModalVisible, setBookModalVisible] = useState(false);
   const [bookSuccess, setBookSuccess] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [viewMode, setViewMode] = useState<'day' | 'month'>(isDesktop ? 'month' : 'day');
+  const [busyDays, setBusyDays] = useState<Set<string>>(() => new Set());
 
   const loadEvents = useCallback(async (date: Date, silent = false) => {
     if (!silent) {
@@ -75,7 +81,7 @@ export function CalendarTab({ userId }: { userId: string }) {
       setCalendarNames(calendars.map((c) => c.title));
 
       const dayEvents = await fetchEventsForDay(date, userId);
-      setEvents(dayEvents);
+      setEvents(mergeHolidayEvents(date, dayEvents));
     } catch {
       setError(strings.calendar.loadError);
       setEvents([]);
@@ -93,6 +99,28 @@ export function CalendarTab({ userId }: { userId: string }) {
   useEffect(() => {
     loadEvents(selectedDate);
   }, [selectedDate, loadEvents]);
+
+  useEffect(() => {
+    if (viewMode !== 'month') return;
+    let cancelled = false;
+    void (async () => {
+      const year = selectedDate.getFullYear();
+      const month = selectedDate.getMonth();
+      const daysInMonth = new Date(year, month + 1, 0).getDate();
+      const next = new Set<string>();
+      for (let day = 1; day <= daysInMonth; day += 1) {
+        const d = new Date(year, month, day);
+        const events = await fetchEventsForDay(d, userId);
+        if (events.length > 0) {
+          next.add(d.toISOString().slice(0, 10));
+        }
+      }
+      if (!cancelled) setBusyDays(next);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedDate.getMonth(), selectedDate.getFullYear(), viewMode, userId]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -172,7 +200,7 @@ export function CalendarTab({ userId }: { userId: string }) {
   if (access === 'unavailable' && !isLoading) {
     return (
       <View style={styles.container}>
-        <View style={styles.header}>
+        <View style={styles.topBar}>
           <Text style={styles.title}>Kalender</Text>
           <Text style={styles.sub}>Uppdatering behövs</Text>
         </View>
@@ -218,7 +246,7 @@ export function CalendarTab({ userId }: { userId: string }) {
             <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={COLORS.purple} />
           }
         >
-          <View style={styles.header}>
+          <View style={styles.topBar}>
             <Text style={styles.title}>{strings.tabs.calendar}</Text>
             <Text style={styles.sub}>{getPlatformCalendarHint()}</Text>
           </View>
@@ -269,74 +297,120 @@ export function CalendarTab({ userId }: { userId: string }) {
     );
   }
 
+  const holidayToday = getSwedishHolidayForDate(selectedDate);
+
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <View style={styles.headerRow}>
-          <View>
-            <Text style={styles.title}>{strings.tabs.calendar}</Text>
-            <Text style={styles.sub}>{formatDayLabel(selectedDate)}</Text>
-          </View>
-          <View style={styles.headerActions}>
-            {events.length > 0 ? (
-              <Pressable style={styles.deleteAllButton} onPress={confirmDeleteAllEvents}>
-                <Ionicons name="trash-outline" size={16} color="#FF8A8A" />
-                <Text style={styles.deleteAllButtonText}>Ta bort alla</Text>
-              </Pressable>
-            ) : null}
-            <Pressable style={styles.bookButton} onPress={() => setBookModalVisible(true)}>
-              <Ionicons name="add" size={18} color={COLORS.text} />
-              <Text style={styles.bookButtonText}>Lägg till</Text>
+      <View style={styles.topBar}>
+        <View style={styles.topBarLeft}>
+          <Text style={styles.title}>{strings.tabs.calendar}</Text>
+          <Text style={styles.sub}>{formatDayLabel(selectedDate)}</Text>
+        </View>
+        <View style={styles.headerActions}>
+          {events.length > 0 ? (
+            <Pressable style={styles.deleteAllButton} onPress={confirmDeleteAllEvents}>
+              <Ionicons name="trash-outline" size={16} color="#FF8A8A" />
+            </Pressable>
+          ) : null}
+          <Pressable style={styles.bookButton} onPress={() => setBookModalVisible(true)}>
+            <Ionicons name="add" size={18} color={COLORS.text} />
+            <Text style={styles.bookButtonText}>Lägg till</Text>
+          </Pressable>
+        </View>
+      </View>
+
+      <View style={styles.toolbarCard}>
+        <View style={styles.segmentRow}>
+          <Pressable
+            style={[styles.segmentChip, viewMode === 'day' && styles.segmentChipActive]}
+            onPress={() => setViewMode('day')}
+          >
+            <Text style={[styles.segmentText, viewMode === 'day' && styles.segmentTextActive]}>
+              Dag
+            </Text>
+          </Pressable>
+          <Pressable
+            style={[styles.segmentChip, viewMode === 'month' && styles.segmentChipActive]}
+            onPress={() => setViewMode('month')}
+          >
+            <Text style={[styles.segmentText, viewMode === 'month' && styles.segmentTextActive]}>
+              Månad
+            </Text>
+          </Pressable>
+          <View style={styles.segmentDivider} />
+          <Pressable style={styles.segmentChip} onPress={goToday}>
+            <Text style={styles.segmentText}>{strings.calendar.today}</Text>
+          </Pressable>
+          <Pressable
+            style={styles.segmentChip}
+            onPress={() => {
+              const tomorrow = new Date();
+              tomorrow.setDate(tomorrow.getDate() + 1);
+              setSelectedDate(tomorrow);
+              setViewMode('day');
+            }}
+          >
+            <Text style={styles.segmentText}>{strings.calendar.tomorrow}</Text>
+          </Pressable>
+        </View>
+
+        {viewMode === 'day' ? (
+          <View style={styles.dateNavRow}>
+            <Pressable
+              style={styles.dayNavButton}
+              onPress={() => setSelectedDate((d) => shiftDay(d, -1))}
+            >
+              <Ionicons name="chevron-back" size={20} color={COLORS.purple} />
+            </Pressable>
+            <Pressable style={styles.dayNavCenter} onPress={goToday}>
+              <Text style={styles.dayNavDate}>
+                {selectedDate.toLocaleDateString(speechTag, {
+                  weekday: 'short',
+                  day: 'numeric',
+                  month: 'short',
+                })}
+              </Text>
+              {!isSameDay(selectedDate, new Date()) ? (
+                <Text style={styles.dayNavToday}>Gå till idag</Text>
+              ) : null}
+            </Pressable>
+            <Pressable
+              style={styles.dayNavButton}
+              onPress={() => setSelectedDate((d) => shiftDay(d, 1))}
+            >
+              <Ionicons name="chevron-forward" size={20} color={COLORS.purple} />
             </Pressable>
           </View>
-        </View>
-        {bookSuccess ? <Text style={styles.successBanner}>{bookSuccess}</Text> : null}
+        ) : null}
       </View>
 
-      <View style={styles.dayNav}>
-        <Pressable style={styles.quickDayChip} onPress={goToday}>
-          <Text style={styles.quickDayText}>{strings.calendar.today}</Text>
-        </Pressable>
-        <Pressable
-          style={styles.quickDayChip}
-          onPress={() => {
-            const tomorrow = new Date();
-            tomorrow.setDate(tomorrow.getDate() + 1);
-            setSelectedDate(tomorrow);
+      {holidayToday ? (
+        <Text style={styles.holidayBanner}>
+          {holidayToday.isRedDay ? '🔴 Röd dag' : '📅 Helgdag'} — {holidayToday.name}
+        </Text>
+      ) : null}
+
+      {bookSuccess ? <Text style={styles.successBanner}>{bookSuccess}</Text> : null}
+
+      {viewMode === 'month' ? (
+        <CalendarMonthView
+          monthDate={selectedDate}
+          selectedDate={selectedDate}
+          busyDays={busyDays}
+          onSelectDay={(d) => {
+            setSelectedDate(d);
+            setViewMode('day');
           }}
-        >
-          <Text style={styles.quickDayText}>{strings.calendar.tomorrow}</Text>
-        </Pressable>
+          onPrevMonth={() =>
+            setSelectedDate((d) => new Date(d.getFullYear(), d.getMonth() - 1, 1))
+          }
+          onNextMonth={() =>
+            setSelectedDate((d) => new Date(d.getFullYear(), d.getMonth() + 1, 1))
+          }
+        />
+      ) : null}
 
-        <Pressable
-          style={styles.dayNavButton}
-          onPress={() => setSelectedDate((d) => shiftDay(d, -1))}
-        >
-          <Ionicons name="chevron-back" size={20} color={COLORS.purple} />
-        </Pressable>
-
-        <Pressable style={styles.dayNavCenter} onPress={goToday}>
-          <Text style={styles.dayNavDate}>
-            {selectedDate.toLocaleDateString(speechTag, {
-              day: 'numeric',
-              month: 'short',
-              year: 'numeric',
-            })}
-          </Text>
-          {!isSameDay(selectedDate, new Date()) && (
-            <Text style={styles.dayNavToday}>Gå till idag</Text>
-          )}
-        </Pressable>
-
-        <Pressable
-          style={styles.dayNavButton}
-          onPress={() => setSelectedDate((d) => shiftDay(d, 1))}
-        >
-          <Ionicons name="chevron-forward" size={20} color={COLORS.purple} />
-        </Pressable>
-      </View>
-
-      {calendarNames.length > 0 && (
+      {viewMode === 'day' && calendarNames.length > 0 && (
         <View style={styles.sourcesRow}>
           <Ionicons name="link-outline" size={14} color={COLORS.textMuted} />
           <Text style={styles.sourcesText} numberOfLines={2}>
@@ -346,7 +420,7 @@ export function CalendarTab({ userId }: { userId: string }) {
         </View>
       )}
 
-      {isLoading ? (
+      {viewMode === 'day' && (isLoading ? (
         <View style={styles.loadingWrap}>
           <ActivityIndicator size="large" color={COLORS.purple} />
           <Text style={styles.loadingText}>Hämtar möten...</Text>
@@ -440,7 +514,7 @@ export function CalendarTab({ userId }: { userId: string }) {
           })}
           <Text style={styles.footerHint}>{getPlatformCalendarHint()}</Text>
         </ScrollView>
-      )}
+      ))}
 
       {bookModalVisible ? (
         <BookEventModal
@@ -457,12 +531,63 @@ export function CalendarTab({ userId }: { userId: string }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
-  header: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 8 },
-  headerRow: {
+  topBar: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 4,
     gap: 12,
+  },
+  topBarLeft: { flex: 1 },
+  toolbarCard: {
+    marginHorizontal: 16,
+    marginBottom: 8,
+    padding: 10,
+    borderRadius: 16,
+    backgroundColor: COLORS.surface,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    gap: 8,
+  },
+  segmentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  segmentChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 999,
+    backgroundColor: COLORS.purpleMuted,
+    borderWidth: 1,
+    borderColor: 'rgba(139, 124, 247, 0.25)',
+  },
+  segmentChipActive: {
+    backgroundColor: COLORS.purple,
+    borderColor: COLORS.purple,
+  },
+  segmentText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.purple,
+  },
+  segmentTextActive: {
+    color: COLORS.text,
+  },
+  segmentDivider: {
+    width: 1,
+    height: 22,
+    backgroundColor: COLORS.border,
+    marginHorizontal: 2,
+  },
+  dateNavRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingTop: 2,
   },
   headerActions: {
     flexDirection: 'row',
@@ -500,32 +625,20 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   successBanner: {
-    marginTop: 8,
+    marginHorizontal: 20,
+    marginBottom: 6,
     fontSize: 13,
     color: '#8AE6A0',
     fontWeight: '500',
   },
-  title: { fontSize: 22, fontWeight: '600', color: COLORS.text },
-  sub: { fontSize: 13, color: COLORS.purple, marginTop: 2 },
-  dayNav: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    marginBottom: 8,
-    gap: 6,
-  },
-  quickDayChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 10,
-    backgroundColor: COLORS.purpleMuted,
-    borderWidth: 1,
-    borderColor: 'rgba(139, 124, 247, 0.35)',
-  },
-  quickDayText: {
-    fontSize: 12,
+  title: { fontSize: 22, fontWeight: '700', color: COLORS.text },
+  sub: { fontSize: 13, color: COLORS.purple, marginTop: 2, fontWeight: '500' },
+  holidayBanner: {
+    fontSize: 13,
+    color: '#FF8A8A',
+    marginHorizontal: 20,
+    marginBottom: 6,
     fontWeight: '600',
-    color: COLORS.purple,
   },
   dayNavButton: {
     width: 40,
@@ -540,11 +653,11 @@ const styles = StyleSheet.create({
   dayNavCenter: {
     flex: 1,
     alignItems: 'center',
-    paddingVertical: 8,
+    paddingVertical: 4,
   },
   dayNavDate: {
     fontSize: 15,
-    fontWeight: '600',
+    fontWeight: '700',
     color: COLORS.text,
   },
   dayNavToday: {

@@ -266,6 +266,70 @@ th { color: var(--muted); font-weight: 500; }
 .status-badge.trial { background: rgba(147, 51, 234, 0.2); color: #c084fc; }
 .status-badge.paying_inactive,
 .status-badge.trial_inactive { background: rgba(156, 163, 175, 0.15); color: var(--muted); }
+.status-badge.blocked { background: rgba(239, 68, 68, 0.2); color: #f87171; }
+.status-badge.free_forever { background: rgba(59, 130, 246, 0.2); color: #93c5fd; }
+
+.device-admin-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.9rem;
+}
+
+.device-admin-row input[type='text'] {
+  flex: 1;
+  min-width: 160px;
+  background: #0f0f18;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.45rem 0.6rem;
+  color: var(--text);
+}
+
+.device-admin-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.device-admin-hint {
+  margin-top: 0.5rem;
+  font-size: 0.8rem;
+}
+
+.btn-warn,
+.btn-danger,
+.btn-secondary {
+  border: none;
+  border-radius: 8px;
+  padding: 0.55rem 0.85rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.btn-secondary {
+  background: rgba(147, 51, 234, 0.2);
+  color: #c084fc;
+}
+
+.btn-warn {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fbbf24;
+}
+
+.btn-danger {
+  background: rgba(239, 68, 68, 0.2);
+  color: #f87171;
+}
 
 @media (max-width: 900px) {
   .finance-grid { grid-template-columns: 1fr; }

@@ -6,12 +6,13 @@ import { AddTaskModal } from '@/components/add-task-modal';
 import { APP_COLORS as COLORS } from '@/constants/app-theme';
 import { getSpeechLocale } from '@/constants/i18n/resolve-locale';
 import { useLocale } from '@/contexts/locale-context';
-import type { AgentTask } from '@/types/memory';
+import { formatTaskReminderLabel } from '@/services/task-reminders';
+import type { AgentTask, TaskRecurrence } from '@/types/memory';
 
 type Props = {
   tasks: AgentTask[];
   onToggleTask: (id: string) => void;
-  onAddTask: (text: string, remindAt?: number) => Promise<void>;
+  onAddTask: (text: string, remindAt?: number, recurrence?: TaskRecurrence) => Promise<void>;
   onDeleteTask: (id: string) => Promise<void>;
 };
 
@@ -71,16 +72,10 @@ export function TasksTab({ tasks, onToggleTask, onAddTask, onDeleteTask }: Props
               </View>
               <View style={styles.taskBody}>
                 <Text style={styles.taskText}>{task.text}</Text>
-                {task.remindAt ? (
+                {formatTaskReminderLabel(task, speechTag) ? (
                   <Text style={styles.taskMeta}>
                     {strings.tasks.reminder}{' '}
-                    {new Date(task.remindAt).toLocaleString(speechTag, {
-                      weekday: 'short',
-                      day: 'numeric',
-                      month: 'short',
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
+                    {formatTaskReminderLabel(task, speechTag)}
                   </Text>
                 ) : null}
               </View>

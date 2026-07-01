@@ -1,11 +1,15 @@
 import type { Translations } from '@/constants/i18n/types';
 import { en } from '@/constants/i18n/translations/en';
 
+type DeepPartial<T> = {
+  [P in keyof T]?: T[P] extends object ? DeepPartial<T[P]> : T[P];
+};
+
 function pick(
   localeName: string,
   geminiLang: string,
   tabs: Partial<Translations['tabs']>,
-  partial?: Partial<Omit<Translations, 'localeName' | 'tabs'>>,
+  partial?: DeepPartial<Omit<Translations, 'localeName' | 'tabs'>>,
 ): Translations {
   return {
     ...en,
@@ -32,53 +36,57 @@ function pick(
   };
 }
 
-export const de: Translations = {
-  localeName: 'Deutsch',
-  tabs: { home: 'Start', email: 'E-Mail', calendar: 'Kalender', assistant: 'Assistent', tasks: 'Aufgaben', settings: 'Einstellungen' },
-  common: { loading: 'Laden...', loadingMemory: 'Speicher laden...', you: 'Du', assistant: 'Assistent', thinking: 'Denke...', listening: 'Höre zu...', comingSoon: 'Demnächst' },
-  assistant: { writePlaceholder: 'Schreib dem Assistenten...', micHint: 'Mikrofon tippen — sprechen — erneut tippen', micListening: 'Hört zu…', micStop: 'Sendet…', micThinking: 'Gemini denkt...', modelLabel: 'Gemini Flash' },
-  tasks: { title: 'Aufgaben', subtitleOpen: '{{count}} offen — sag es dem Assistenten', subtitleEmpty: 'Z.B. „Erinnere mich ans Einkaufen"', empty: 'Noch keine Aufgaben.', reminder: 'Erinnerung', done: 'Erledigt' },
-  settings: { title: 'Einstellungen', app: 'App', mode: 'Modus', testMode: 'Test — kein Login', testModeDesc: 'Assistent und Kalender direkt nutzen.', language: 'Sprache', languageAuto: 'Automatisch (vom Handy)', googleMail: 'Google Mail', loggedInAs: 'Angemeldet als', logoutGoogle: 'Bei Google abmelden', clearGoogle: 'Google-Berechtigung löschen', notLoggedInGoogle: 'Nicht bei Google angemeldet', profile: 'Profil', name: 'Name', job: 'Beruf', meetingReminders: 'Terminerinnerungen', remindersOn: 'An — {{minutes}} Min. vorher', remindersOff: 'Aus', enableReminders: 'Erinnerungen aktivieren', disableReminders: 'Erinnerungen deaktivieren', remindersHint: 'Der Assistent erinnert vor Terminen.', preferences: 'Vorlieben', noPreferences: 'Noch keine Vorlieben', personalMemory: 'Persönliches Gedächtnis', noNotes: 'Der Assistent lernt beim Sprechen', conversations: 'Gespräche ({{count}} Nachrichten)', clearHistory: 'Verlauf löschen' },
-  onboarding: { title: 'Willkommen bei My Assistant', subtitle: 'Sag Name und Beruf — ich passe mich an.', nameLabel: 'Wie heißt du?', namePlaceholder: 'Dein Name', jobLabel: 'Was machst du?', jobPlaceholder: 'z.B. Lehrer', start: 'Los geht\'s' },
-  gmail: { title: 'Gmail kommt bald', subtitle: 'E-Mail später. Assistent und Kalender funktionieren.' },
-  welcome: { default: 'Hallo! Sprich wie mit einem Freund — ich helfe im Alltag.' },
-  home: {
-    greetingMorning: 'Guten Morgen',
-    greetingAfternoon: 'Guten Tag',
-    greetingEvening: 'Guten Abend',
-    greetingNight: 'Gute Nacht',
-    greetingName: '{{greeting}}, {{name}}',
-    weather: 'Wetter',
-    meetingsToday: 'Termine heute',
-    noMeetings: 'Keine Termine heute',
-    unreadMail: 'Ungelesene Mails',
-    openTasks: 'Offene Aufgaben',
-    allDay: 'Ganztägig',
-    talkToAssistant: 'Mit Assistent sprechen',
-    adaptHint: 'Ich passe mich deinen Bedürfnissen an — je mehr wir reden, desto besser verstehe ich dich.',
-    weatherUnavailable: 'Wetter nicht verfügbar',
+export const de: Translations = pick(
+  'Deutsch',
+  'Antworte immer auf Deutsch. Natürlich, kurze Sätze für Sprache.',
+  { home: 'Start', email: 'E-Mail', calendar: 'Kalender', assistant: 'Assistent', tasks: 'Aufgaben', settings: 'Einstellungen' },
+  {
+    common: { loading: 'Laden...', loadingMemory: 'Speicher laden...', you: 'Du', assistant: 'Assistent', thinking: 'Denke...', listening: 'Höre zu...', comingSoon: 'Demnächst' },
+    assistant: { writePlaceholder: 'Schreib dem Assistenten...', micHint: 'Mikrofon tippen — sprechen — erneut tippen', micListening: 'Hört zu…', micStop: 'Sendet…', micThinking: 'Gemini denkt...', modelLabel: 'Gemini Flash' },
+    tasks: { title: 'Aufgaben', subtitleOpen: '{{count}} offen — sag es dem Assistenten', subtitleEmpty: 'Z.B. „Erinnere mich ans Einkaufen"', empty: 'Noch keine Aufgaben.', reminder: 'Erinnerung', done: 'Erledigt' },
+    settings: { title: 'Einstellungen', app: 'App', mode: 'Modus', testMode: 'Test — kein Login', testModeDesc: 'Assistent und Kalender direkt nutzen.', language: 'Sprache', languageAuto: 'Automatisch (vom Handy)', googleMail: 'Google Mail', loggedInAs: 'Angemeldet als', logoutGoogle: 'Bei Google abmelden', clearGoogle: 'Google-Berechtigung löschen', notLoggedInGoogle: 'Nicht bei Google angemeldet', profile: 'Profil', name: 'Name', job: 'Beruf', meetingReminders: 'Terminerinnerungen', remindersOn: 'An — {{minutes}} Min. vorher', remindersOff: 'Aus', enableReminders: 'Erinnerungen aktivieren', disableReminders: 'Erinnerungen deaktivieren', remindersHint: 'Der Assistent erinnert vor Terminen.', preferences: 'Vorlieben', noPreferences: 'Noch keine Vorlieben', personalMemory: 'Persönliches Gedächtnis', noNotes: 'Der Assistent lernt beim Sprechen', conversations: 'Gespräche ({{count}} Nachrichten)', clearHistory: 'Verlauf löschen' },
+    onboarding: { title: 'Willkommen bei My Assistant', subtitle: 'Sag Name und Beruf — ich passe mich an.', nameLabel: 'Wie heißt du?', namePlaceholder: 'Dein Name', jobLabel: 'Was machst du?', jobPlaceholder: 'z.B. Lehrer', start: 'Los geht\'s' },
+    gmail: { title: 'Gmail kommt bald', subtitle: 'E-Mail später. Assistent und Kalender funktionieren.' },
+    welcome: { default: 'Hallo! Sprich wie mit einem Freund — ich helfe im Alltag.' },
+    home: {
+      greetingMorning: 'Guten Morgen',
+      greetingAfternoon: 'Guten Tag',
+      greetingEvening: 'Guten Abend',
+      greetingNight: 'Gute Nacht',
+      greetingName: '{{greeting}}, {{name}}',
+      weather: 'Wetter',
+      meetingsToday: 'Termine heute',
+      noMeetings: 'Keine Termine heute',
+      unreadMail: 'Ungelesene Mails',
+      openTasks: 'Offene Aufgaben',
+      allDay: 'Ganztägig',
+      talkToAssistant: 'Mit Assistent sprechen',
+      adaptHint: 'Ich passe mich deinen Bedürfnissen an — je mehr wir reden, desto besser verstehe ich dich.',
+      weatherUnavailable: 'Wetter nicht verfügbar',
+    },
+    gemini: {
+      adaptToNeeds: 'Du passt dich den Bedürfnissen der Person an — du lernst Gewohnheiten und Wünsche beim Sprechen.',
+    },
+    calendar: {
+      today: 'Heute', tomorrow: 'Morgen', allDay: 'Ganztägig', permissionTitle: 'Kalenderberechtigung nötig',
+      permissionText: 'Zugriff erlauben, um Termine anzuzeigen.', allowAccess: 'Kalender erlauben', openSettings: 'Einstellungen öffnen',
+      loadError: 'Kalender konnte nicht geladen werden.', emptyDay: 'Nichts geplant. Tippe Termin buchen.', platformHint: 'Termine werden in der App und im Telefonkalender gespeichert.',
+      bookedSuccess: 'Termin gespeichert für {{day}}.', meetingSoon: 'Termin bald', meetingBody: '{{title}} beginnt in {{minutes}} Min ({{time}})',
+    },
+    notifications: { taskTitle: 'Erinnerung', meetingsChannel: 'Termine', tasksChannel: 'Aufgaben' },
+    agent: {
+      bookingCancelled: 'OK, nichts im Kalender gebucht.', emailCancelled: 'OK, E-Mail nicht gesendet.', pendingBooking: 'Ausstehende Buchung: {{summary}}. Sage "ja" oder "buchen".',
+      pendingEmail: 'Ausstehende E-Mail. Sage "senden" oder "abbrechen".', gmailRequiredSend: 'Verbinde zuerst Google Mail.', gmailRequiredEmail: 'Google Mail unter E-Mail verbinden.',
+      calendarLoadError: 'Kalenderinfo nicht verfügbar.', gmailLoadError: 'Gmail konnte nicht gelesen werden.', gmailNotConnected: 'Gmail nicht verbunden.', genericError: 'Etwas ist schiefgelaufen.',
+    },
   },
-  gemini: {
-    replyLanguage: 'Antworte immer auf Deutsch. Natürlich, kurze Sätze für Sprache.',
-    adaptToNeeds: 'Du passt dich den Bedürfnissen der Person an — du lernst Gewohnheiten und Wünsche beim Sprechen.',
-  },
-  calendar: {
-    today: 'Heute', tomorrow: 'Morgen', allDay: 'Ganztägig', permissionTitle: 'Kalenderberechtigung nötig',
-    permissionText: 'Zugriff erlauben, um Termine anzuzeigen.', allowAccess: 'Kalender erlauben', openSettings: 'Einstellungen öffnen',
-    loadError: 'Kalender konnte nicht geladen werden.', emptyDay: 'Nichts geplant. Tippe Termin buchen.', platformHint: 'Termine werden in der App und im Telefonkalender gespeichert.',
-    bookedSuccess: 'Termin gespeichert für {{day}}.', meetingSoon: 'Termin bald', meetingBody: '{{title}} beginnt in {{minutes}} Min ({{time}})',
-  },
-  notifications: { taskTitle: 'Erinnerung', meetingsChannel: 'Termine', tasksChannel: 'Aufgaben' },
-  agent: {
-    bookingCancelled: 'OK, nichts im Kalender gebucht.', emailCancelled: 'OK, E-Mail nicht gesendet.', pendingBooking: 'Ausstehende Buchung: {{summary}}. Sage "ja" oder "buchen".',
-    pendingEmail: 'Ausstehende E-Mail. Sage "senden" oder "abbrechen".', gmailRequiredSend: 'Verbinde zuerst Google Mail.', gmailRequiredEmail: 'Google Mail unter E-Mail verbinden.',
-    calendarLoadError: 'Kalenderinfo nicht verfügbar.', gmailLoadError: 'Gmail konnte nicht gelesen werden.', gmailNotConnected: 'Gmail nicht verbunden.', genericError: 'Etwas ist schiefgelaufen.',
-  },
-};
+);
 
-export const es: Translations = {
-  localeName: 'Español',
-  tabs: { home: 'Inicio', email: 'Correo', calendar: 'Calendario', assistant: 'Asistente', tasks: 'Tareas', settings: 'Ajustes' },
+export const es: Translations = pick(
+  'Español',
+  'Responde siempre en español. Natural, frases cortas para voz.',
+  { home: 'Inicio', email: 'Correo', calendar: 'Calendario', assistant: 'Asistente', tasks: 'Tareas', settings: 'Ajustes' },
+  {
   common: { loading: 'Cargando...', loadingMemory: 'Cargando memoria...', you: 'Tú', assistant: 'Asistente', thinking: 'Pensando...', listening: 'Escuchando...', comingSoon: 'Próximamente' },
   assistant: { writePlaceholder: 'Escribe al asistente...', micHint: 'Toca el micrófono — habla — toca otra vez', micListening: 'Escuchando…', micStop: 'Enviando…', micThinking: 'Gemini piensa...', modelLabel: 'Gemini Flash' },
   tasks: { title: 'Tareas', subtitleOpen: '{{count}} por hacer', subtitleEmpty: 'Ej.: "recuérdame comprar"', empty: 'Sin tareas aún.', reminder: 'Recordatorio', done: 'Hecho' },
@@ -103,7 +111,6 @@ export const es: Translations = {
     weatherUnavailable: 'Tiempo no disponible',
   },
   gemini: {
-    replyLanguage: 'Responde siempre en español. Natural, frases cortas para voz.',
     adaptToNeeds: 'Te adaptas a las necesidades de la persona — aprendes hábitos y deseos al hablar.',
   },
   calendar: {
@@ -118,11 +125,14 @@ export const es: Translations = {
     pendingEmail: 'Correo pendiente. Di "enviar" o "cancelar".', gmailRequiredSend: 'Conecta Google Mail primero.', gmailRequiredEmail: 'Conecta Google Mail en Email.',
     calendarLoadError: 'Info del calendario no disponible.', gmailLoadError: 'Gmail no se pudo leer.', gmailNotConnected: 'Gmail no conectado.', genericError: 'Algo salió mal.',
   },
-};
+  },
+);
 
-export const fr: Translations = {
-  localeName: 'Français',
-  tabs: { home: 'Accueil', email: 'E-mail', calendar: 'Calendrier', assistant: 'Assistant', tasks: 'Tâches', settings: 'Réglages' },
+export const fr: Translations = pick(
+  'Français',
+  'Réponds toujours en français. Naturel, phrases courtes pour la voix.',
+  { home: 'Accueil', email: 'E-mail', calendar: 'Calendrier', assistant: 'Assistant', tasks: 'Tâches', settings: 'Réglages' },
+  {
   common: { loading: 'Chargement...', loadingMemory: 'Chargement mémoire...', you: 'Vous', assistant: 'Assistant', thinking: 'Réflexion...', listening: 'Écoute...', comingSoon: 'Bientôt' },
   assistant: { writePlaceholder: 'Écrire à l\'assistant...', micHint: 'Appuyez sur le micro — parlez — réappuyez', micListening: 'Écoute…', micStop: 'Envoi…', micThinking: 'Gemini réfléchit...', modelLabel: 'Gemini Flash' },
   tasks: { title: 'Tâches', subtitleOpen: '{{count}} à faire', subtitleEmpty: 'Ex. « rappelle-moi d\'acheter »', empty: 'Pas encore de tâches.', reminder: 'Rappel', done: 'Fait' },
@@ -147,7 +157,6 @@ export const fr: Translations = {
     weatherUnavailable: 'Météo indisponible',
   },
   gemini: {
-    replyLanguage: 'Réponds toujours en français. Naturel, phrases courtes pour la voix.',
     adaptToNeeds: 'Tu t\'adaptes aux besoins de la personne — tu apprends ses habitudes en parlant.',
   },
   calendar: {
@@ -162,7 +171,8 @@ export const fr: Translations = {
     pendingEmail: 'E-mail en attente. Dites "envoyer" ou "annuler".', gmailRequiredSend: 'Connectez Google Mail d\'abord.', gmailRequiredEmail: 'Connectez Google Mail dans E-mail.',
     calendarLoadError: 'Info calendrier indisponible.', gmailLoadError: 'Gmail illisible.', gmailNotConnected: 'Gmail non connecté.', genericError: 'Une erreur s\'est produite.',
   },
-};
+  },
+);
 
 export const zh: Translations = pick('中文', '请始终用简体中文回答。自然、简短，适合语音。', { email: '邮件', calendar: '日历', assistant: '助手', tasks: '任务', settings: '设置' }, {
   common: { loading: '加载中...', loadingMemory: '加载记忆...', you: '你', assistant: '助手', thinking: '思考中...', listening: '聆听中...', comingSoon: '即将推出' },

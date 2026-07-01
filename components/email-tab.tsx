@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -14,6 +14,13 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+
+import {
+  consumeSentEmailCacheInvalidation,
+  markSentEmailCacheDirty,
+  subscribeSentEmailCacheInvalidation,
+} from '@/services/email-cache-events';
+import { ensureEmailSignature } from '@/services/email-signature';
 
 const COLORS = {
   background: '#0D0D0D',
@@ -54,6 +61,12 @@ const FILTERS: { id: FilterId; label: string }[] = [
   { id: 'skickade', label: 'Skickade' },
   { id: 'stjärnmarkerade', label: 'Stjärnmarkerade' },
 ];
+
+const FILTER_BACK_LABEL: Record<FilterId, string> = {
+  inkorgen: 'Inkorg',
+  skickade: 'Skickade',
+  stjärnmarkerade: 'Stjärnmarkerade',
+};
 
 const MOCK_EMAILS: Email[] = [
   {
@@ -257,19 +270,20 @@ function formatEmailDate(date: Date): string {
   return date.toLocaleDateString('sv-SE', { day: 'numeric', month: 'short' });
 }
 
-function parseGmailMessage(msg: GmailMessage): Email | null {
+function parseGmailMessage(msg: GmailMessage, labelId?: string): Email | null {
   if (!msg.id) return null;
 
   const headers = msg.payload?.headers || [];
   const getHeader = (name: string) =>
     headers.find((h) => h.name.toLowerCase() === name.toLowerCase())?.value || '';
 
-  const fromRaw = getHeader('From');
-  const nameMatch = fromRaw.match(/^"?([^"<]+)"?\s*<?/);
-  const fromName = nameMatch?.[1]?.trim() || fromRaw;
-  const emailAddrMatch = fromRaw.match(/<([^>]+)>/);
-  const fromEmail = emailAddrMatch?.[1]?.trim() || (fromRaw.includes('@') ? fromRaw.trim() : '');
-  const initials = fromName
+  const isSent = labelId === 'SENT';
+  const addressRaw = isSent ? getHeader('To') : getHeader('From');
+  const nameMatch = addressRaw.match(/^"?([^"<]+)"?\s*<?/);
+  const displayName = nameMatch?.[1]?.trim() || addressRaw;
+  const emailAddrMatch = addressRaw.match(/<([^>]+)>/);
+  const fromEmail = emailAddrMatch?.[1]?.trim() || (addressRaw.includes('@') ? addressRaw.trim() : '');
+  const initials = displayName
     .split(/\s+/)
     .slice(0, 2)
     .map((w) => w[0] || '')
@@ -281,7 +295,7 @@ function parseGmailMessage(msg: GmailMessage): Email | null {
 
   return {
     id: msg.id,
-    from: fromName,
+    from: isSent ? `Till: ${displayName}` : displayName,
     fromEmail,
     fromShort: initials,
     subject: getHeader('Subject') || '(Inget ämne)',
@@ -296,11 +310,19 @@ async function fetchGmailEmails(
   accessToken: string,
   labelId: string,
   pageToken?: string,
+  searchQuery?: string,
 ): Promise<EmailListCache> {
   const params = new URLSearchParams({
     maxResults: '25',
-    labelIds: labelId,
   });
+  const trimmedQuery = searchQuery?.trim();
+  if (trimmedQuery) {
+    const labelScope =
+      labelId === 'SENT' ? 'in:sent' : labelId === 'STARRED' ? 'is:starred' : 'in:inbox';
+    params.set('q', `${labelScope} ${trimmedQuery}`);
+  } else {
+    params.set('labelIds', labelId);
+  }
   if (pageToken) params.set('pageToken', pageToken);
 
   const listRes = await fetch(
@@ -320,6 +342,7 @@ async function fetchGmailEmails(
 
   const ids = (listData.messages as { id: string }[]).map((m) => m.id);
   const messages: GmailMessage[] = [];
+  const addressHeader = labelId === 'SENT' ? 'To' : 'From';
 
   for (let i = 0; i < ids.length; i += 6) {
     const chunk = ids.slice(i, i + 6);
@@ -327,7 +350,7 @@ async function fetchGmailEmails(
       chunk.map(async (id) => {
         const res = await fetch(
           `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=metadata` +
-            `&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`,
+            `&metadataHeaders=${addressHeader}&metadataHeaders=Subject&metadataHeaders=Date`,
           { headers: { Authorization: `Bearer ${accessToken}` } },
         );
         if (res.status === 401 || res.status === 403) {
@@ -350,7 +373,7 @@ async function fetchGmailEmails(
   }
 
   const emails = messages
-    .map(parseGmailMessage)
+    .map((msg) => parseGmailMessage(msg, labelId))
     .filter((email): email is Email => email !== null);
 
   return { emails, nextPageToken: listData.nextPageToken };
@@ -445,6 +468,8 @@ function ComposeEmailModal({
   visible,
   defaultTo,
   defaultSubject,
+  senderName,
+  senderJob,
   isSending,
   onClose,
   onSend,
@@ -452,6 +477,8 @@ function ComposeEmailModal({
   visible: boolean;
   defaultTo?: string;
   defaultSubject?: string;
+  senderName?: string;
+  senderJob?: string;
   isSending: boolean;
   onClose: () => void;
   onSend: (to: string, subject: string, body: string) => Promise<void>;
@@ -477,7 +504,8 @@ function ComposeEmailModal({
     }
     setError(null);
     try {
-      await onSend(to.trim(), subject.trim(), message.trim());
+      const signedBody = ensureEmailSignature(message.trim(), senderName ?? '', senderJob);
+      await onSend(to.trim(), subject.trim(), signedBody);
       onClose();
     } catch {
       setError('Kunde inte skicka mejlet. Logga ut och in igen.');
@@ -682,11 +710,19 @@ function ReplyEmailModal({
 function EmailDetailView({
   email,
   accessToken,
+  backLabel,
+  isSent,
+  senderName,
+  senderJob,
   onBack,
   onSent,
 }: {
   email: Email;
   accessToken?: string;
+  backLabel: string;
+  isSent: boolean;
+  senderName?: string;
+  senderJob?: string;
   onBack: () => void;
   onSent?: () => void;
 }) {
@@ -749,7 +785,7 @@ function EmailDetailView({
         accessToken,
         email.fromEmail,
         replySubject(email.subject),
-        replyText.trim(),
+        ensureEmailSignature(replyText.trim(), senderName ?? '', senderJob),
       );
       setReplyText('');
       setShowReply(false);
@@ -765,7 +801,7 @@ function EmailDetailView({
     <View style={styles.detailContainer}>
       <Pressable style={styles.backButton} onPress={onBack}>
         <Ionicons name="chevron-back" size={20} color={COLORS.purple} />
-        <Text style={styles.backText}>Inkorg</Text>
+        <Text style={styles.backText}>{backLabel}</Text>
       </Pressable>
 
       <ScrollView
@@ -805,39 +841,43 @@ function EmailDetailView({
           )}
         </View>
 
-        <View style={styles.replyBar}>
-          <Pressable
-            style={styles.replyButton}
-            onPress={() => {
-              setSendError(null);
-              setShowReply(true);
-            }}
-          >
-            <Ionicons name="arrow-undo-outline" size={16} color={COLORS.purple} />
-            <Text style={styles.replyButtonText}>Svara</Text>
-          </Pressable>
-        </View>
+        {!isSent && (
+          <View style={styles.replyBar}>
+            <Pressable
+              style={styles.replyButton}
+              onPress={() => {
+                setSendError(null);
+                setShowReply(true);
+              }}
+            >
+              <Ionicons name="arrow-undo-outline" size={16} color={COLORS.purple} />
+              <Text style={styles.replyButtonText}>Svara</Text>
+            </Pressable>
+          </View>
+        )}
       </ScrollView>
 
-      <ReplyEmailModal
-        visible={showReply}
-        toName={email.from}
-        subject={email.subject}
-        time={email.time}
-        originalBody={body}
-        isLoadingOriginal={isLoadingBody}
-        replyText={replyText}
-        onChangeText={setReplyText}
-        isSending={isSending}
-        sendError={sendError}
-        onClose={() => {
-          if (!isSending) {
-            setShowReply(false);
-            setSendError(null);
-          }
-        }}
-        onSend={handleSendReply}
-      />
+      {!isSent && (
+        <ReplyEmailModal
+          visible={showReply}
+          toName={email.from}
+          subject={email.subject}
+          time={email.time}
+          originalBody={body}
+          isLoadingOriginal={isLoadingBody}
+          replyText={replyText}
+          onChangeText={setReplyText}
+          isSending={isSending}
+          sendError={sendError}
+          onClose={() => {
+            if (!isSending) {
+              setShowReply(false);
+              setSendError(null);
+            }
+          }}
+          onSend={handleSendReply}
+        />
+      )}
     </View>
   );
 }
@@ -851,14 +891,20 @@ function getEmailFetchErrorMessage(error: unknown): string {
 
 export function EmailTab({
   accessToken,
+  senderName,
+  senderJob,
   onSessionExpired,
   onRefreshToken,
 }: {
   accessToken?: string;
+  senderName?: string;
+  senderJob?: string;
   onSessionExpired?: () => void;
   onRefreshToken?: () => Promise<string | null>;
 }) {
   const [activeFilter, setActiveFilter] = useState<FilterId>('inkorgen');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [selectedEmail, setSelectedEmail] = useState<Email | null>(null);
   const [emailCache, setEmailCache] = useState<Partial<Record<FilterId, EmailListCache>>>({});
   const [isLoadingEmails, setIsLoadingEmails] = useState(false);
@@ -875,6 +921,46 @@ export function EmailTab({
     filter === 'skickade' ? 'SENT' :
     filter === 'stjärnmarkerade' ? 'STARRED' : 'INBOX';
 
+  const loadEmails = useCallback(
+    (filter: FilterId, replace = true, query = debouncedSearch) => {
+      if (!accessToken) return;
+
+      setIsLoadingEmails(true);
+      setEmailError(null);
+
+      fetchGmailEmails(accessToken, getLabelId(filter), undefined, query || undefined)
+        .then((result) => {
+          setEmailCache((prev) => ({ ...prev, [filter]: result }));
+          if (filter === 'inkorgen' && !query) {
+            setStarred(new Set(result.emails.filter((e) => e.starred).map((e) => e.id)));
+          }
+        })
+        .catch((error) => {
+          const message = getEmailFetchErrorMessage(error);
+          setEmailError(message);
+          if (error instanceof Error && error.message === 'auth_failed') {
+            void handleAuthFailure();
+          }
+          if (replace) {
+            setEmailCache((prev) => ({ ...prev, [filter]: { emails: [] } }));
+          }
+        })
+        .finally(() => setIsLoadingEmails(false));
+    },
+    [accessToken, debouncedSearch],
+  );
+
+  const invalidateSentCache = useCallback(() => {
+    setEmailCache((prev) => {
+      const next = { ...prev };
+      delete next.skickade;
+      return next;
+    });
+    if (accessToken && activeFilter === 'skickade') {
+      loadEmails('skickade', true);
+    }
+  }, [accessToken, activeFilter, loadEmails]);
+
   const handleAuthFailure = async () => {
     if (onRefreshToken) {
       const newToken = await onRefreshToken();
@@ -886,36 +972,26 @@ export function EmailTab({
     onSessionExpired?.();
   };
 
-  const loadEmails = (filter: FilterId, replace = true) => {
-    if (!accessToken) return;
-
-    setIsLoadingEmails(true);
-    setEmailError(null);
-
-    fetchGmailEmails(accessToken, getLabelId(filter))
-      .then((result) => {
-        setEmailCache((prev) => ({ ...prev, [filter]: result }));
-        if (filter === 'inkorgen') {
-          setStarred(new Set(result.emails.filter((e) => e.starred).map((e) => e.id)));
-        }
-      })
-      .catch((error) => {
-        const message = getEmailFetchErrorMessage(error);
-        setEmailError(message);
-        if (error instanceof Error && error.message === 'auth_failed') {
-          handleAuthFailure();
-        }
-        if (replace) {
-          setEmailCache((prev) => ({ ...prev, [filter]: { emails: [] } }));
-        }
-      })
-      .finally(() => setIsLoadingEmails(false));
-  };
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 350);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
   useEffect(() => {
-    if (!accessToken || emailCache[activeFilter] !== undefined) return;
-    loadEmails(activeFilter);
-  }, [accessToken, activeFilter, emailCache]);
+    if (!accessToken) return;
+    setEmailCache({});
+    loadEmails(activeFilter, true, debouncedSearch);
+  }, [accessToken, activeFilter, debouncedSearch, loadEmails]);
+
+  useEffect(() => {
+    const unsubscribe = subscribeSentEmailCacheInvalidation(() => {
+      invalidateSentCache();
+    });
+    void consumeSentEmailCacheInvalidation().then((dirty) => {
+      if (dirty) invalidateSentCache();
+    });
+    return unsubscribe;
+  }, [invalidateSentCache]);
 
   const loadMoreEmails = async () => {
     if (!accessToken || isLoadingMore) return;
@@ -928,6 +1004,7 @@ export function EmailTab({
         accessToken,
         getLabelId(activeFilter),
         cache.nextPageToken,
+        debouncedSearch || undefined,
       );
       setEmailCache((prev) => ({
         ...prev,
@@ -951,6 +1028,7 @@ export function EmailTab({
     setIsSendingEmail(true);
     try {
       await sendGmailMessage(accessToken, to, subject, body);
+      await markSentEmailCacheDirty();
       setEmailCache((prev) => {
         const next = { ...prev };
         delete next.skickade;
@@ -972,19 +1050,22 @@ export function EmailTab({
         <EmailDetailView
           email={selectedEmail}
           accessToken={accessToken}
+          backLabel={FILTER_BACK_LABEL[activeFilter]}
+          isSent={activeFilter === 'skickade'}
+          senderName={senderName}
+          senderJob={senderJob}
           onBack={() => setSelectedEmail(null)}
           onSent={() => {
-            setEmailCache((prev) => {
-              const next = { ...prev };
-              delete next.skickade;
-              return next;
-            });
+            void markSentEmailCacheDirty();
+            invalidateSentCache();
           }}
         />
         <ComposeEmailModal
           visible={composeVisible}
           defaultTo={composeDefaults.to}
           defaultSubject={composeDefaults.subject}
+          senderName={senderName}
+          senderJob={senderJob}
           isSending={isSendingEmail}
           onClose={() => setComposeVisible(false)}
           onSend={handleSendEmail}
@@ -994,12 +1075,26 @@ export function EmailTab({
   }
 
   const getEmails = (): Email[] => {
+    let base: Email[];
     if (accessToken) {
-      return emailCache[activeFilter]?.emails ?? [];
+      base = emailCache[activeFilter]?.emails ?? [];
+    } else if (activeFilter === 'skickade') {
+      base = SENT_MOCK;
+    } else if (activeFilter === 'stjärnmarkerade') {
+      base = MOCK_EMAILS.filter((e) => starred.has(e.id));
+    } else {
+      base = MOCK_EMAILS;
     }
-    if (activeFilter === 'skickade') return SENT_MOCK;
-    if (activeFilter === 'stjärnmarkerade') return MOCK_EMAILS.filter((e) => starred.has(e.id));
-    return MOCK_EMAILS;
+
+    const q = searchQuery.trim().toLowerCase();
+    if (!q || (accessToken && debouncedSearch)) return base;
+
+    return base.filter(
+      (email) =>
+        email.from.toLowerCase().includes(q) ||
+        email.subject.toLowerCase().includes(q) ||
+        email.preview.toLowerCase().includes(q),
+    );
   };
 
   const emails = getEmails();
@@ -1048,6 +1143,27 @@ export function EmailTab({
           </Pressable>
         ))}
       </ScrollView>
+
+      <View style={styles.searchRow}>
+        <Ionicons name="search-outline" size={18} color={COLORS.textMuted} />
+        <TextInput
+          style={styles.searchInput}
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          placeholder={accessToken ? 'Sök mail (Gmail)' : 'Sök i listan'}
+          placeholderTextColor={COLORS.textMuted}
+          autoCapitalize="none"
+          autoCorrect={false}
+          cursorColor={COLORS.purple}
+          selectionColor={COLORS.purpleMuted}
+          keyboardAppearance="dark"
+        />
+        {searchQuery.length > 0 ? (
+          <Pressable onPress={() => setSearchQuery('')} hitSlop={8}>
+            <Ionicons name="close-circle" size={18} color={COLORS.textMuted} />
+          </Pressable>
+        ) : null}
+      </View>
 
       {isLoadingEmails ? (
         <View style={styles.loadingWrap}>
@@ -1153,6 +1269,8 @@ export function EmailTab({
         visible={composeVisible}
         defaultTo={composeDefaults.to}
         defaultSubject={composeDefaults.subject}
+        senderName={senderName}
+        senderJob={senderJob}
         isSending={isSendingEmail}
         onClose={() => setComposeVisible(false)}
         onSend={handleSendEmail}
@@ -1184,6 +1302,25 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   filterRow: { maxHeight: 40, marginBottom: 4 },
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginHorizontal: 16,
+    marginBottom: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    backgroundColor: COLORS.surface,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 15,
+    color: COLORS.text,
+    paddingVertical: 0,
+  },
   filterContent: { paddingHorizontal: 16, gap: 8, flexDirection: 'row' },
   filterChip: {
     paddingHorizontal: 14,

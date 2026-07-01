@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  AppState,
   Modal,
   Pressable,
   RefreshControl,
@@ -15,9 +16,11 @@ import {
 } from 'react-native';
 
 import { APP_COLORS as COLORS } from '@/constants/app-theme';
+import type { AgentTask } from '@/types/memory';
 import { APP_VERSION } from '@/constants/app-version';
 import { getSpeechLocale } from '@/constants/i18n/resolve-locale';
 import { useLocale } from '@/contexts/locale-context';
+import { useIsDesktop } from '@/hooks/use-is-desktop';
 import {
   buildBriefingLines,
   buildMeetingPrepLines,
@@ -43,7 +46,12 @@ import {
 } from '@/services/usage-stats';
 import { fetchWeather, type WeatherSnapshot } from '@/services/weather';
 import { persistProfilePhoto } from '@/services/profile-photo';
-import type { AgentTask } from '@/types/memory';
+import { mergeHolidayEvents, getSwedishHolidayForDate } from '@/services/swedish-holidays';
+import {
+  formatBirthdayLabel,
+  getUpcomingBirthdays,
+} from '@/services/birthday-reminders';
+import type { BirthdayEntry } from '@/types/memory';
 import type { Translations } from '@/constants/i18n/types';
 
 const AVATAR_OPTIONS = [
@@ -62,6 +70,7 @@ type Props = {
   profilePhotoUri?: string;
   onProfilePhotoChange?: (uri: string | undefined) => void;
   tasks: AgentTask[];
+  birthdays?: BirthdayEntry[];
   googleAccessToken?: string;
   onOpenAssistant: () => void;
   onOpenAssistantWithPrompt?: (prompt: string) => void;
@@ -130,6 +139,7 @@ export function HomeTab({
   profilePhotoUri,
   onProfilePhotoChange,
   tasks,
+  birthdays = [],
   googleAccessToken,
   onOpenAssistant,
   onOpenAssistantWithPrompt,
@@ -140,6 +150,7 @@ export function HomeTab({
   isSickDayBusy,
 }: Props) {
   const { locale, strings, t } = useLocale();
+  const isDesktop = useIsDesktop();
   const speechTag = getSpeechLocale(locale);
 
   const [now, setNow] = useState(() => new Date());
@@ -252,7 +263,9 @@ export function HomeTab({
 
       try {
         const fullMeetings = await fetchEventsForDay(today, userId);
-        setMeetings(fullMeetings.sort((a, b) => a.start.getTime() - b.start.getTime()));
+        setMeetings(
+          mergeHolidayEvents(today, fullMeetings).sort((a, b) => a.start.getTime() - b.start.getTime()),
+        );
       } catch {
         // lokala möten visas redan
       }
@@ -287,8 +300,16 @@ export function HomeTab({
   }, [loadDashboard]);
 
   useEffect(() => {
-    const timer = setInterval(() => setNow(new Date()), 30_000);
-    return () => clearInterval(timer);
+    const tick = () => setNow(new Date());
+    tick();
+    const timer = setInterval(tick, 10_000);
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') tick();
+    });
+    return () => {
+      clearInterval(timer);
+      sub.remove();
+    };
   }, []);
 
   const onRefresh = useCallback(async () => {
@@ -310,13 +331,19 @@ export function HomeTab({
     minute: '2-digit',
   });
 
+  const holidayToday = getSwedishHolidayForDate(now);
+  const upcomingBirthdays = useMemo(
+    () => getUpcomingBirthdays({ birthdays } as import('@/types/memory').UserMemory, 14),
+    [birthdays],
+  );
+
   const visibleGroups: CalendarGroup[] = ['family', 'colleagues', 'work', 'other'];
 
   return (
     <>
     <ScrollView
       style={styles.container}
-      contentContainerStyle={styles.content}
+      contentContainerStyle={[styles.content, isDesktop && styles.contentDesktop]}
       showsVerticalScrollIndicator={false}
       refreshControl={
         <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.purple} />
@@ -356,11 +383,52 @@ export function HomeTab({
                 : greeting}
             </Text>
             <Text style={styles.dateLine}>{dateLine}</Text>
+            {holidayToday ? (
+              <Text style={styles.holidayLine}>
+                {holidayToday.isRedDay ? '🔴 Röd dag' : '📅'} {holidayToday.name}
+              </Text>
+            ) : null}
             <Text style={styles.timeLine}>{timeLine}</Text>
           </View>
         </View>
         {userJob ? <Text style={styles.jobLine}>{userJob}</Text> : null}
         <Text style={styles.versionLine}>Version {APP_VERSION}</Text>
+      </View>
+
+      <View style={styles.snapshotCard}>
+        <View style={styles.snapshotRow}>
+          <Pressable style={styles.snapshotItem} onPress={() => onOpenEmail?.()}>
+            <Ionicons name="mail-outline" size={16} color={COLORS.purple} />
+            <Text style={styles.snapshotText}>
+              {googleAccessToken
+                ? unread === null
+                  ? 'Hämtar mail…'
+                  : unread === 0
+                    ? 'Inga olästa mail'
+                    : `${unread} olästa`
+                : 'Koppla Gmail i Email'}
+            </Text>
+          </Pressable>
+          <View style={styles.snapshotDivider} />
+          <Pressable style={styles.snapshotItem} onPress={onOpenCalendar}>
+            <Ionicons name="calendar-outline" size={16} color={COLORS.purple} />
+            <Text style={styles.snapshotText}>
+              {meetingsLoading && meetings.length === 0
+                ? 'Hämtar kalender…'
+                : meetings.length === 0
+                  ? 'Inga möten idag'
+                  : `${meetings.length} möten idag`}
+            </Text>
+          </Pressable>
+        </View>
+        {nextMeeting ? (
+          <Text style={styles.snapshotNext} numberOfLines={1}>
+            Nästa: {nextMeeting.title}
+            {!nextMeeting.allDay
+              ? ` · ${nextMeeting.start.toLocaleTimeString(speechTag, { hour: '2-digit', minute: '2-digit' })}`
+              : ''}
+          </Text>
+        ) : null}
       </View>
 
       {briefingKind && briefingLines.length > 0 ? (
@@ -472,8 +540,16 @@ export function HomeTab({
       <View style={styles.statsRow}>
         <Pressable style={styles.statCard} onPress={() => onOpenEmail?.()}>
           <Ionicons name="mail-outline" size={18} color={COLORS.purple} />
-          <Text style={styles.statValue}>{unread ?? '—'}</Text>
-          <Text style={styles.statLabel}>{strings.home.unreadMail}</Text>
+          <Text style={styles.statValue}>
+            {googleAccessToken
+              ? unread ?? '…'
+              : '—'}
+          </Text>
+          <Text style={styles.statLabel}>
+            {googleAccessToken && typeof unread === 'number' && unread > 0
+              ? `${unread} olästa`
+              : strings.home.unreadMail}
+          </Text>
         </Pressable>
 
         <Pressable style={styles.statCard} onPress={onOpenCalendar}>
@@ -578,6 +654,21 @@ export function HomeTab({
         )}
       </View>
 
+      {upcomingBirthdays.length > 0 ? (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Födelsedagar</Text>
+          {upcomingBirthdays.map(({ entry, daysUntil }) => (
+            <View key={entry.id} style={styles.taskRow}>
+              <Ionicons name="gift-outline" size={16} color={COLORS.purple} />
+              <Text style={styles.taskText}>
+                {formatBirthdayLabel(entry)}
+                {daysUntil === 0 ? ' — idag!' : daysUntil === 1 ? ' — imorgon' : ` — om ${daysUntil} dagar`}
+              </Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
+
       {openTasks.length > 0 ? (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>{strings.home.openTasks}</Text>
@@ -673,6 +764,11 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 28,
     gap: 16,
+  },
+  contentDesktop: {
+    paddingHorizontal: 8,
+    paddingTop: 16,
+    paddingBottom: 32,
   },
   hero: {
     gap: 8,
@@ -811,6 +907,12 @@ const styles = StyleSheet.create({
     color: COLORS.purple,
     textTransform: 'capitalize',
   },
+  holidayLine: {
+    fontSize: 13,
+    color: '#FF8A8A',
+    marginTop: 2,
+    fontWeight: '600',
+  },
   timeLine: {
     fontSize: 32,
     fontWeight: '600',
@@ -827,6 +929,41 @@ const styles = StyleSheet.create({
     color: COLORS.purple,
     marginTop: 6,
     fontWeight: '600',
+  },
+  snapshotCard: {
+    backgroundColor: COLORS.surface,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    padding: 14,
+    gap: 8,
+  },
+  snapshotRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  snapshotItem: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  snapshotDivider: {
+    width: 1,
+    height: 28,
+    backgroundColor: COLORS.border,
+    marginHorizontal: 8,
+  },
+  snapshotText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.text,
+  },
+  snapshotNext: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    paddingTop: 2,
   },
   cardHeader: {
     flexDirection: 'row',

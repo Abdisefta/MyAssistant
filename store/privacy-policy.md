@@ -1,5 +1,7 @@
 # Integritetspolicy för My Assistant
 
+<!-- TODO(launch): Replace [DIN E-POST@EXEMPEL.SE] below with your real support email before Play Store publish. Do NOT invent an address — use the one you will monitor. Two places: sections 1 and 11. -->
+
 **Senast uppdaterad:** 18 juni 2026  
 **App:** My Assistant  
 **Utvecklare:** Abdi / Abdisefta  

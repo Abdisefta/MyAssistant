@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { AppLocale } from '@/constants/i18n/types';
 import { getTranslations } from '@/constants/i18n/translations/index';
 import { getSpeechLocale } from '@/constants/i18n/resolve-locale';
+import { formatTaskReminderLabel } from '@/services/task-reminders';
 import {
   DEFAULT_MEMORY,
   MEMORY_STORAGE_KEY,
@@ -27,6 +28,7 @@ export async function loadMemory(userId?: string): Promise<UserMemory> {
       preferences: parsed.preferences ?? [],
       personalNotes: parsed.personalNotes ?? [],
       tasks: parsed.tasks ?? [],
+      birthdays: parsed.birthdays ?? [],
       conversationHistory: parsed.conversationHistory ?? [],
       meetingRemindersEnabled: parsed.meetingRemindersEnabled ?? true,
       reminderMinutesBefore: parsed.reminderMinutesBefore ?? 15,
@@ -89,9 +91,8 @@ export function buildSystemPrompt(
           .filter((t) => !t.done)
           .slice(-8)
           .map((t) => {
-            const when = t.remindAt
-              ? ` (påminnelse ${new Date(t.remindAt).toLocaleString(speechTag, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })})`
-              : '';
+            const whenLabel = formatTaskReminderLabel(t, speechTag);
+            const when = whenLabel ? ` (påminnelse ${whenLabel})` : '';
             return `- ${t.text}${when}`;
           })
           .join('\n')
@@ -106,6 +107,16 @@ export function buildSystemPrompt(
   const emailOk = !emails.includes('inte kopplat') && !emails.includes('Kunde inte');
 
   return `Du är My Assistant — en personlig AI-assistent lika smart och naturlig som ChatGPT, med röst. Du känner ${memory.name || 'användaren'} personligen och hjälper med vardag, planering, mail och kalender. Du anpassar dig efter personens behov och lär känna deras vanor ju mer ni pratar.
+
+AKTUELL TID (telefonens lokala tid — svara med denna om användaren frågar vad klockan är):
+- ${new Date().toLocaleString(speechTag, {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })}
 
 ANVÄNDARE:
 - Namn: ${memory.name || 'Okänd — fråga vänligt vad de heter'}
@@ -133,6 +144,7 @@ DINA FÖRMÅGOR (användaren kan be dig via röst):
 - Avboka möte: t.ex. "Avboka möte imorgon kl 14" — appen tar bort mötet direkt.
 - Sjuk idag: t.ex. "Jag är sjuk" — appen avbokar direkt alla möten idag (eller imorgon om du säger imorgon) och mailar deltagarna att du är sjuk, ber om ursäkt och återkommer när du är frisk.
 - Lägg till uppgift: "Påminn mig att handla mat imorgon" — appen sparar uppgiften.
+- Spara födelsedag: "Spara födelsedag för Marie 15 juli" — appen påminner dagen innan.
 - Ta bort uppgift: "Ta bort uppgift handla mat" — appen tar bort den.
 - Läsa mail: "Har jag olästa mail?" / "Mail från Anna?"
 - Skicka mail: "Skriv till X och säg …" — appen skickar direkt (kräver Gmail)

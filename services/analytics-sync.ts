@@ -89,3 +89,38 @@ export async function trackAppLaunch(): Promise<void> {
   }
   await trackAnalyticsEvent('app_open');
 }
+
+const TRIAL_EMAIL_SENT_KEY = '@my_assistant_trial_email_sent';
+
+/** Registrera inloggad e-post så samma adress inte får ny 2-månadersperiod. */
+export async function registerTrialEmailWithServer(
+  email: string,
+  uid?: string | null,
+): Promise<void> {
+  if (!isAnalyticsConfigured() || !email?.trim()) return;
+  const normalized = email.trim().toLowerCase();
+  const cacheKey = `${TRIAL_EMAIL_SENT_KEY}:${normalized}`;
+  const alreadySent = await AsyncStorage.getItem(cacheKey);
+  if (alreadySent) return;
+
+  try {
+    const deviceId = await getDeviceId();
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 12_000);
+    const res = await fetch(`${ANALYTICS_BASE_URL}/api/trial/register`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Analytics-Key': ANALYTICS_API_KEY,
+      },
+      body: JSON.stringify({ deviceId, email: normalized, uid: uid ?? undefined }),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (res.ok) {
+      await AsyncStorage.setItem(cacheKey, '1');
+    }
+  } catch {
+    // Analytics ska aldrig störa appen
+  }
+}

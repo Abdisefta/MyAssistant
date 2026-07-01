@@ -20,12 +20,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { APP_COLORS as COLORS } from '@/constants/app-theme';
 import { useLocale } from '@/contexts/locale-context';
+import { useIsDesktop } from '@/hooks/use-is-desktop';
 import type { TranscriptEntry } from '@/hooks/use-assistant';
 
 const QUICK_PHRASES: { label: string; phrase: string }[] = [
   { label: 'Möten idag?', phrase: 'Vad har jag för möten idag?' },
   { label: 'Boka imorgon', phrase: 'Boka möte imorgon kl 10' },
-  { label: 'Påminnelse', phrase: 'Påminn mig att handla mat' },
+  { label: 'Blir sen', phrase: 'Skicka mail och säg att jag blir sen till mötet' },
   { label: 'Ta bort möte', phrase: 'Ta bort senaste mötet' },
 ];
 
@@ -41,6 +42,9 @@ type Props = {
   onMicPress: () => void;
   onQuickPhrase: (phrase: string) => void;
   onComposeOpenChange?: (open: boolean) => void;
+  showTipChip?: boolean;
+  onDismissTipChip?: () => void;
+  onTryTipChip?: () => void;
 };
 
 function TranscriptBubble({ entry }: { entry: TranscriptEntry }) {
@@ -197,8 +201,12 @@ export function AssistantScreen({
   onMicPress,
   onQuickPhrase,
   onComposeOpenChange,
+  showTipChip,
+  onDismissTipChip,
+  onTryTipChip,
 }: Props) {
   const { strings } = useLocale();
+  const isDesktop = useIsDesktop();
   const pulseOuter = useRef(new Animated.Value(1)).current;
   const pulseInner = useRef(new Animated.Value(1)).current;
   const glowOpacity = useRef(new Animated.Value(0.35)).current;
@@ -270,7 +278,7 @@ export function AssistantScreen({
   }, [transcript]);
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, isDesktop && styles.containerDesktop]}>
       <Text style={styles.headerTitle}>
         My Assistant{memoryName ? ` · ${memoryName}` : ''}
       </Text>
@@ -278,6 +286,7 @@ export function AssistantScreen({
         {memoryJob ? `${memoryJob} · ${strings.assistant.modelLabel}` : strings.assistant.modelLabel}
       </Text>
 
+      {!isDesktop && (
       <View style={styles.orbSection}>
         <View style={styles.orbContainer}>
           <Animated.View
@@ -299,8 +308,28 @@ export function AssistantScreen({
           </View>
         </View>
       </View>
+      )}
 
-      <View style={styles.transcriptContainer}>
+      {showTipChip ? (
+        <View style={styles.tipChip}>
+          <Pressable
+            style={styles.tipChipMain}
+            onPress={() => {
+              void Haptics.selectionAsync();
+              onTryTipChip?.();
+            }}
+            disabled={isThinking}
+          >
+            <Ionicons name="bulb-outline" size={16} color={COLORS.purple} />
+            <Text style={styles.tipChipText}>Prova: Boka möte imorgon klockan tio</Text>
+          </Pressable>
+          <Pressable onPress={onDismissTipChip} hitSlop={8} accessibilityLabel="Stäng tips">
+            <Ionicons name="close" size={18} color={COLORS.textMuted} />
+          </Pressable>
+        </View>
+      ) : null}
+
+      <View style={[styles.transcriptContainer, isDesktop && styles.transcriptContainerDesktop]}>
         <View style={styles.transcriptHeader}>
           <Ionicons name="chatbubbles-outline" size={14} color={COLORS.textMuted} />
           <Text style={styles.transcriptHeaderText}>Transkript</Text>
@@ -317,6 +346,88 @@ export function AssistantScreen({
         </ScrollView>
       </View>
 
+      {isDesktop ? (
+        <View style={styles.desktopInputSection}>
+          <View style={styles.desktopInputRow}>
+            <TextInput
+              style={styles.desktopInput}
+              value={inputText}
+              onChangeText={onInputChange}
+              placeholder={strings.assistant.writePlaceholder}
+              placeholderTextColor={COLORS.textMuted}
+              multiline
+              editable={!isThinking}
+              cursorColor={COLORS.purple}
+              selectionColor={COLORS.purpleMuted}
+              keyboardAppearance="dark"
+              onSubmitEditing={onSend}
+            />
+            <Pressable
+              style={[
+                styles.desktopSendButton,
+                (!inputText.trim() || isThinking) && styles.desktopSendDisabled,
+              ]}
+              onPress={onSend}
+              disabled={!inputText.trim() || isThinking}
+            >
+              {isThinking ? (
+                <ActivityIndicator color={COLORS.text} size="small" />
+              ) : (
+                <Ionicons name="send" size={20} color={COLORS.text} />
+              )}
+            </Pressable>
+          </View>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.quickPhrasesRow}
+            keyboardShouldPersistTaps="handled"
+          >
+            {QUICK_PHRASES.map(({ label, phrase }) => (
+              <Pressable
+                key={phrase}
+                style={[styles.quickPhraseChip, isThinking && styles.quickPhraseDisabled]}
+                onPress={() => {
+                  if (isThinking) return;
+                  void Haptics.selectionAsync();
+                  onQuickPhrase(phrase);
+                }}
+                disabled={isThinking}
+              >
+                <Text style={styles.quickPhraseText} numberOfLines={1}>
+                  {label}
+                </Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+          <View style={styles.desktopMicRow}>
+            <Text style={styles.micHint}>
+              {isListening
+                ? strings.assistant.micListening
+                : isThinking
+                  ? strings.assistant.micThinking
+                  : strings.assistant.micHint}
+            </Text>
+            <Pressable
+              onPress={() => {
+                void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                onMicPress();
+              }}
+              disabled={isThinking}
+              style={({ pressed }) => [
+                styles.micButton,
+                styles.desktopMicButton,
+                isListening && styles.micButtonActive,
+                pressed && !isListening && styles.micButtonPressed,
+                isThinking && styles.micButtonDisabled,
+              ]}
+            >
+              <Ionicons name={isListening ? 'mic' : 'mic-outline'} size={24} color={COLORS.text} />
+            </Pressable>
+          </View>
+        </View>
+      ) : (
+        <>
       <Pressable style={styles.inputTrigger} onPress={openCompose}>
         <View style={styles.inputTriggerBody}>
           <Text style={styles.inputTriggerLabel}>Skriv till assistenten</Text>
@@ -390,6 +501,8 @@ export function AssistantScreen({
         onClose={closeCompose}
         onSend={onSend}
       />
+        </>
+      )}
     </View>
   );
 }
@@ -398,6 +511,10 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     paddingHorizontal: 20,
+  },
+  containerDesktop: {
+    paddingHorizontal: 0,
+    paddingBottom: 8,
   },
   headerTitle: {
     fontSize: 22,
@@ -410,6 +527,30 @@ const styles = StyleSheet.create({
     color: COLORS.purple,
     marginTop: 2,
     marginBottom: 4,
+  },
+  tipChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: COLORS.purpleMuted,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(139, 124, 247, 0.35)',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    marginBottom: 8,
+  },
+  tipChipMain: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  tipChipText: {
+    flex: 1,
+    fontSize: 13,
+    color: COLORS.text,
+    fontWeight: '500',
   },
   orbSection: {
     alignItems: 'center',
@@ -473,6 +614,10 @@ const styles = StyleSheet.create({
     borderColor: COLORS.border,
     marginBottom: 8,
     overflow: 'hidden',
+  },
+  transcriptContainerDesktop: {
+    minHeight: 320,
+    marginBottom: 12,
   },
   transcriptHeader: {
     flexDirection: 'row',
@@ -542,6 +687,52 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderWidth: 1,
+  },
+  desktopInputSection: {
+    gap: 8,
+    paddingTop: 4,
+  },
+  desktopInputRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 10,
+    backgroundColor: COLORS.surfaceElevated,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  desktopInput: {
+    flex: 1,
+    minHeight: 44,
+    maxHeight: 120,
+    color: COLORS.text,
+    fontSize: 16,
+    lineHeight: 22,
+    paddingVertical: 8,
+  },
+  desktopSendButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: COLORS.purple,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  desktopSendDisabled: {
+    opacity: 0.5,
+  },
+  desktopMicRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: 4,
+  },
+  desktopMicButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
   },
   bubbleUser: {
     backgroundColor: COLORS.userBubble,

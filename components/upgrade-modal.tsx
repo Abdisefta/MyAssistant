@@ -1,9 +1,16 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useState } from 'react';
+import { Alert, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { APP_COLORS as COLORS } from '@/constants/app-theme';
 import { useLocale } from '@/contexts/locale-context';
+import {
+  isPlayBillingAvailable,
+  PRO_PRICE_SEK,
+  PRO_SUBSCRIPTION_SKU,
+  purchaseProSubscription,
+} from '@/services/play-billing';
 import type { UsageCheckResult } from '@/services/usage-limits';
 
 type Props = {
@@ -12,17 +19,31 @@ type Props = {
   onClose: () => void;
 };
 
-const PLAN_PRICE_SEK = 199;
-
 export function UpgradeModal({ visible, check, onClose }: Props) {
   const { strings, t } = useLocale();
+  const [purchaseBusy, setPurchaseBusy] = useState(false);
 
+  const billingAvailable = isPlayBillingAvailable();
+  const isBlocked = check?.period === 'blocked';
   const periodLabel =
     check?.period === 'budget'
       ? strings.upgrade.periodBudget
       : check?.period === 'month'
         ? strings.upgrade.periodMonth
-        : strings.upgrade.periodDay;
+        : check?.period === 'blocked'
+          ? 'spärr'
+          : strings.upgrade.periodDay;
+
+  const handlePurchasePress = useCallback(async () => {
+    if (purchaseBusy) return;
+    setPurchaseBusy(true);
+    try {
+      const result = await purchaseProSubscription();
+      Alert.alert(strings.upgrade.comingSoon, result.message);
+    } finally {
+      setPurchaseBusy(false);
+    }
+  }, [purchaseBusy, strings.upgrade.comingSoon]);
 
   return (
     <Modal visible={visible} animationType="fade" transparent statusBarTranslucent onRequestClose={onClose}>
@@ -30,12 +51,20 @@ export function UpgradeModal({ visible, check, onClose }: Props) {
         <SafeAreaView edges={['top', 'bottom']} style={styles.safe}>
           <View style={styles.card}>
             <View style={styles.iconWrap}>
-              <Ionicons name="rocket-outline" size={28} color={COLORS.purple} />
+              <Ionicons
+                name={isBlocked || check?.period === 'budget' ? 'warning-outline' : 'rocket-outline'}
+                size={28}
+                color={isBlocked || check?.period === 'budget' ? '#F5A623' : COLORS.purple}
+              />
             </View>
-            <Text style={styles.title}>{strings.upgrade.title}</Text>
-            <Text style={styles.subtitle}>{strings.upgrade.subtitle}</Text>
+            <Text style={styles.title}>
+              {isBlocked ? strings.upgrade.blockedTitle : strings.upgrade.title}
+            </Text>
+            <Text style={styles.subtitle}>
+              {check?.message ?? strings.upgrade.subtitle}
+            </Text>
 
-            {check ? (
+            {check && !isBlocked ? (
               <View style={styles.limitBox}>
                 <Text style={styles.limitText}>
                   {t('upgrade.limitDetail', {
@@ -47,17 +76,32 @@ export function UpgradeModal({ visible, check, onClose }: Props) {
               </View>
             ) : null}
 
-            <View style={styles.priceBox}>
-              <Text style={styles.priceLabel}>{strings.upgrade.planLabel}</Text>
-              <Text style={styles.price}>{PLAN_PRICE_SEK} kr/mån</Text>
-              <Text style={styles.priceHint}>{strings.upgrade.planHint}</Text>
-            </View>
+            {!isBlocked ? (
+              <View style={styles.priceBox}>
+                <Text style={styles.priceLabel}>{strings.upgrade.planLabel}</Text>
+                <Text style={styles.price}>{PRO_PRICE_SEK} kr/mån</Text>
+                <Text style={styles.priceHint}>{strings.upgrade.planHint}</Text>
+                {!billingAvailable ? (
+                  <Text style={styles.skuHint}>
+                    Produkt-ID (placeholder): {PRO_SUBSCRIPTION_SKU}
+                  </Text>
+                ) : null}
+              </View>
+            ) : null}
 
-            <Pressable style={styles.primaryBtn} onPress={onClose}>
-              <Text style={styles.primaryBtnText}>{strings.upgrade.comingSoon}</Text>
-            </Pressable>
+            {!isBlocked ? (
+              <Pressable
+                style={[styles.primaryBtn, !billingAvailable && styles.primaryBtnDisabled]}
+                onPress={handlePurchasePress}
+                disabled={purchaseBusy}
+              >
+                <Text style={styles.primaryBtnText}>{strings.upgrade.comingSoon}</Text>
+              </Pressable>
+            ) : null}
             <Pressable style={styles.secondaryBtn} onPress={onClose}>
-              <Text style={styles.secondaryBtnText}>{strings.upgrade.close}</Text>
+              <Text style={styles.secondaryBtnText}>
+                {isBlocked ? strings.upgrade.blockedClose : strings.upgrade.close}
+              </Text>
             </Pressable>
           </View>
         </SafeAreaView>
@@ -144,12 +188,22 @@ const styles = StyleSheet.create({
     marginTop: 6,
     textAlign: 'center',
   },
+  skuHint: {
+    color: COLORS.textMuted,
+    fontSize: 11,
+    marginTop: 10,
+    textAlign: 'center',
+    fontStyle: 'italic',
+  },
   primaryBtn: {
     backgroundColor: COLORS.purple,
     borderRadius: 12,
     paddingVertical: 14,
     alignItems: 'center',
     marginBottom: 10,
+  },
+  primaryBtnDisabled: {
+    opacity: 0.85,
   },
   primaryBtnText: {
     color: '#FFF',

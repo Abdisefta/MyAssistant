@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -15,17 +15,42 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { APP_COLORS as COLORS } from '@/constants/app-theme';
-import { loginWithEmail, registerWithEmail } from '@/services/app-auth';
+import { APP_VERSION } from '@/constants/app-version';
+import { getFirebaseConfigPreview } from '@/constants/firebase';
+import {
+  loginWithEmail,
+  registerWithEmail,
+  signInWithAppleCredential,
+  signInWithGoogleCredential,
+} from '@/services/app-auth';
+import {
+  configureSocialAuth,
+  isAppleSignInAvailable,
+  signInWithAppleNative,
+  signInWithGoogleNative,
+} from '@/services/social-auth';
 
 type Mode = 'login' | 'register';
 
-export function AuthScreen({ isConfigured }: { isConfigured: boolean }) {
+type Props = {
+  isConfigured: boolean;
+  onContinueAsGuest?: () => void;
+  onClose?: () => void;
+  asModal?: boolean;
+};
+
+export function AuthScreen({ isConfigured, onContinueAsGuest, onClose, asModal }: Props) {
   const [mode, setMode] = useState<Mode>('register');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [socialLoading, setSocialLoading] = useState<'google' | 'apple' | null>(null);
+
+  useEffect(() => {
+    configureSocialAuth();
+  }, []);
 
   const handleSubmit = async () => {
     if (!email.trim() || !password) {
@@ -54,6 +79,52 @@ export function AuthScreen({ isConfigured }: { isConfigured: boolean }) {
     }
   };
 
+  const handleGoogle = async () => {
+    setError(null);
+    setSocialLoading('google');
+    try {
+      const { idToken, error: googleError } = await signInWithGoogleNative();
+      if (googleError) {
+        setError(googleError);
+        Alert.alert('Google', googleError);
+        return;
+      }
+      if (!idToken) return;
+
+      const result = await signInWithGoogleCredential(idToken);
+      if (result.error) {
+        setError(result.error);
+        Alert.alert('Google', result.error);
+      }
+    } finally {
+      setSocialLoading(null);
+    }
+  };
+
+  const handleApple = async () => {
+    setError(null);
+    setSocialLoading('apple');
+    try {
+      const { identityToken, error: appleError } = await signInWithAppleNative();
+      if (appleError) {
+        setError(appleError);
+        Alert.alert('Apple', appleError);
+        return;
+      }
+      if (!identityToken) return;
+
+      const result = await signInWithAppleCredential(identityToken);
+      if (result.error) {
+        setError(result.error);
+        Alert.alert('Apple', result.error);
+      }
+    } finally {
+      setSocialLoading(null);
+    }
+  };
+
+  const busy = isLoading || socialLoading !== null;
+
   if (!isConfigured) {
     return (
       <SafeAreaView style={styles.safe}>
@@ -70,6 +141,13 @@ export function AuthScreen({ isConfigured }: { isConfigured: boolean }) {
 
   return (
     <SafeAreaView style={styles.safe}>
+      {asModal && onClose ? (
+        <View style={styles.modalHeader}>
+          <Pressable onPress={onClose} hitSlop={12}>
+            <Ionicons name="close" size={26} color={COLORS.textMuted} />
+          </Pressable>
+        </View>
+      ) : null}
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
@@ -84,8 +162,47 @@ export function AuthScreen({ isConfigured }: { isConfigured: boolean }) {
           </View>
           <Text style={styles.title}>My Assistant</Text>
           <Text style={styles.subtitle}>
-            Skapa konto med e-post och lösenord. Enkelt — inget Google-krångel.
+            Logga in med Google, Apple eller e-post. Om du redan har konto loggas du in automatiskt.
           </Text>
+          <Text style={styles.debugLine}>v{APP_VERSION} · {getFirebaseConfigPreview()}</Text>
+
+          <Pressable
+            style={[styles.socialButton, busy && styles.disabled]}
+            onPress={handleGoogle}
+            disabled={busy}
+          >
+            {socialLoading === 'google' ? (
+              <ActivityIndicator color={COLORS.text} size="small" />
+            ) : (
+              <>
+                <Ionicons name="logo-google" size={20} color={COLORS.text} />
+                <Text style={styles.socialButtonText}>Fortsätt med Google</Text>
+              </>
+            )}
+          </Pressable>
+
+          {isAppleSignInAvailable() ? (
+            <Pressable
+              style={[styles.socialButton, styles.appleButton, busy && styles.disabled]}
+              onPress={handleApple}
+              disabled={busy}
+            >
+              {socialLoading === 'apple' ? (
+                <ActivityIndicator color={COLORS.text} size="small" />
+              ) : (
+                <>
+                  <Ionicons name="logo-apple" size={20} color={COLORS.text} />
+                  <Text style={styles.socialButtonText}>Fortsätt med Apple</Text>
+                </>
+              )}
+            </Pressable>
+          ) : null}
+
+          <View style={styles.dividerRow}>
+            <View style={styles.dividerLine} />
+            <Text style={styles.dividerText}>eller e-post</Text>
+            <View style={styles.dividerLine} />
+          </View>
 
           <View style={styles.modeRow}>
             <Pressable
@@ -114,7 +231,7 @@ export function AuthScreen({ isConfigured }: { isConfigured: boolean }) {
               value={name}
               onChangeText={setName}
               autoCapitalize="words"
-              editable={!isLoading}
+              editable={!busy}
               cursorColor={COLORS.purple}
               keyboardAppearance="dark"
             />
@@ -128,7 +245,7 @@ export function AuthScreen({ isConfigured }: { isConfigured: boolean }) {
             onChangeText={setEmail}
             keyboardType="email-address"
             autoCapitalize="none"
-            editable={!isLoading}
+            editable={!busy}
             cursorColor={COLORS.purple}
             keyboardAppearance="dark"
           />
@@ -140,15 +257,15 @@ export function AuthScreen({ isConfigured }: { isConfigured: boolean }) {
             value={password}
             onChangeText={setPassword}
             secureTextEntry
-            editable={!isLoading}
+            editable={!busy}
             cursorColor={COLORS.purple}
             keyboardAppearance="dark"
           />
 
           <Pressable
-            style={[styles.primaryButton, isLoading && styles.disabled]}
+            style={[styles.primaryButton, busy && styles.disabled]}
             onPress={handleSubmit}
-            disabled={isLoading}
+            disabled={busy}
           >
             {isLoading ? (
               <ActivityIndicator color={COLORS.text} />
@@ -160,6 +277,27 @@ export function AuthScreen({ isConfigured }: { isConfigured: boolean }) {
           </Pressable>
 
           {error ? <Text style={styles.error}>{error}</Text> : null}
+
+          {onContinueAsGuest ? (
+            <>
+              <View style={styles.dividerRow}>
+                <View style={styles.dividerLine} />
+                <Text style={styles.dividerText}>eller</Text>
+                <View style={styles.dividerLine} />
+              </View>
+              <Pressable
+                style={[styles.guestButton, busy && styles.disabled]}
+                onPress={onContinueAsGuest}
+                disabled={busy}
+              >
+                <Ionicons name="person-outline" size={18} color={COLORS.purple} />
+                <Text style={styles.guestButtonText}>Fortsätt utan konto</Text>
+              </Pressable>
+              <Text style={styles.guestHint}>
+                Assistent, kalender och uppgifter fungerar lokalt på telefonen utan inloggning.
+              </Text>
+            </>
+          ) : null}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -199,7 +337,20 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 20,
     marginTop: 8,
-    marginBottom: 24,
+    marginBottom: 8,
+  },
+  debugLine: {
+    fontSize: 11,
+    color: COLORS.textMuted,
+    textAlign: 'center',
+    marginBottom: 12,
+    opacity: 0.85,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    paddingHorizontal: 16,
+    paddingTop: 8,
   },
   muted: {
     fontSize: 14,
@@ -207,6 +358,31 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 22,
   },
+  socialButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    backgroundColor: COLORS.surface,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 14,
+    paddingVertical: 14,
+    marginBottom: 10,
+  },
+  appleButton: {
+    backgroundColor: '#1C1C1E',
+    borderColor: '#333',
+  },
+  socialButtonText: { color: COLORS.text, fontSize: 15, fontWeight: '600' },
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginVertical: 16,
+  },
+  dividerLine: { flex: 1, height: 1, backgroundColor: COLORS.border },
+  dividerText: { fontSize: 12, color: COLORS.textMuted },
   modeRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
   modeTab: {
     flex: 1,
@@ -242,5 +418,25 @@ const styles = StyleSheet.create({
   },
   primaryButtonText: { color: COLORS.text, fontSize: 16, fontWeight: '600' },
   error: { fontSize: 13, color: '#FF8A8A', textAlign: 'center', marginTop: 12 },
+  guestButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(139, 124, 247, 0.45)',
+    backgroundColor: COLORS.purpleMuted,
+    marginTop: 4,
+  },
+  guestButtonText: { color: COLORS.purple, fontSize: 15, fontWeight: '600' },
+  guestHint: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    textAlign: 'center',
+    lineHeight: 18,
+    marginTop: 10,
+  },
   disabled: { opacity: 0.6 },
 });

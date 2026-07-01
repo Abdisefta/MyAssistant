@@ -1,22 +1,28 @@
-My Assistant — din personliga assistent i fickan
+My Assistant — din personliga AI-assistent för jobb och vardag
 
-My Assistant hjälper dig att hålla koll på vardagen med AI, röst, e-post, kalender och uppgifter — på svenska.
+My Assistant hjälper dig att hålla koll på arbetsdagen och privatlivet med röst, e-post, kalender och uppgifter — på svenska.
 
 🎙️ Röstassistent
-Prata eller skriv med assistenten. Den minns dina preferenser och konversationer lokalt på enheten och svarar med hjälp av Google Gemini.
+Prata eller skriv med assistenten. Boka möten, skicka professionella mail, sätt påminnelser (även återkommande, t.ex. varje måndag kl 9) och fråga om dagen. Alma TTS ger naturligt tal tillbaka. Assistenten minns dina preferenser lokalt på enheten.
 
 📧 E-post (Google Mail)
-Koppla ditt Google-konto för att läsa och skicka mail direkt i appen. Sammanfattningar och svar när du behöver dem.
+Koppla Google Mail för att läsa, söka och skicka mail i appen. Assistenten skriver affärsmässiga utkast med signatur från din profil — perfekt när du behöver säga att du blir sen eller följa upp ett möte.
 
 📅 Kalender
-Se kommande möten från kalendrar på enheten. Få påminnelser innan möten och låt assistenten ge dig kontext inför dagen.
+Se dagens möten, få påminnelser och låt assistenten boka eller avboka tider. Hem-skärmen visar snabb översikt: olästa mail och kommande möten.
 
 ✅ Uppgifter
-Hantera dina uppgifter och få stöd från assistenten att prioritera det viktigaste.
+Hantera uppgifter med engångs- eller veckopåminnelser. Assistenten hjälper dig prioritera det viktigaste.
 
-🔐 Säker inloggning
-Logga in med Google, Apple (iPhone) eller e-post och lösenord via Firebase. Ditt minne och din historik kopplas till ditt konto på enheten.
+💼 För jobb och privat
+Snabbknappar för vanliga situationer — möten idag, boka imorgon, skicka att du blir sen. Samma app för kontoret och hemmet.
+
+🔐 Integritet
+Data sparas lokalt på enheten. Valfri inloggning via Google, Apple eller e-post för molnsynk när det aktiveras.
+
+💳 Pris
+2 månaders gratisperiod, därefter My Assistant Pro för 199 kr/mån (kommer via Google Play). Gäster kan prova utan konto — en gratisperiod per enhet.
 
 My Assistant är utvecklad av Abdi / Abdisefta för dig som vill ha en enkel, mörk och modern assistent — utan onödig krångel.
 
-Krav: internet för AI och e-post. Vissa funktioner kräver att du kopplar Google Mail och ger kalenderbehörighet.
+Krav: internet för AI och e-post. Gmail och kalenderbehörighet krävs för respektive funktioner.
